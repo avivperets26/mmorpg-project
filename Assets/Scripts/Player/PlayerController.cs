@@ -13,6 +13,12 @@ public class PlayerController : MonoBehaviour
     public float dodgeDuration = 0.25f;
     public float dodgeCooldown = 0.6f;
 
+    [Header("Rotation")]
+    public bool rotateWhileStrafing = true; // if true, rotate even on pure A/D input
+
+    [Header("Camera")]
+    public Transform cameraPivot; // assign an empty child of the player
+
     [Header("Mouse & Click-to-Move")]
     public LayerMask groundMask;             // Set to your Ground layer(s) only
     public float stopDistance = 0.15f;       // Distance to consider arrival
@@ -109,22 +115,29 @@ public class PlayerController : MonoBehaviour
 
         if (hasKeyboardInput)
         {
-            // Rotate only if there is forward/back input; do NOT rotate on pure A/D strafe
-            if (!strafingOnly && desiredDir.sqrMagnitude > 0.0001f)
+            if (desiredDir.sqrMagnitude > 0.0001f && (rotateWhileStrafing || !strafingOnly))
+            {
                 RotateTowards(desiredDir);
+            }
         }
         else
         {
             // Only face mouse when you're actually in click-to-move mode
             if (hasClickTarget)
             {
-                if (TryGetMouseGroundPoint(out var mousePoint))
+                // if you already cache target, face that; otherwise face current mouse ground point
+                Vector3 toTarget = clickTargetWorld - transform.position; toTarget.y = 0f;
+                if (toTarget.sqrMagnitude > 0.0001f)
+                {
+                    RotateTowards(toTarget.normalized);
+                }
+                else if (TryGetMouseGroundPoint(out var mousePoint))
                 {
                     Vector3 faceDir = mousePoint - transform.position; faceDir.y = 0f;
                     if (faceDir.sqrMagnitude > 0.0001f) RotateTowards(faceDir.normalized);
                 }
             }
-            // else: no rotation while idle (prevents spin/chasing)
+            // else: no rotation while completely idle (prevents micro-spin)
         }
     }
 
