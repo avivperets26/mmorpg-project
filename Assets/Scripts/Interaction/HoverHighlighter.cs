@@ -1,35 +1,80 @@
 using UnityEngine;
+using HighlightPlus;
 
-public class HoverHighlighter : MonoBehaviour, IHoverHighlight
+// Add this if you use the new Input System
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
+
+public class HoverHighlighter : MonoBehaviour
 {
-    public string outlineLayerName = "Outline";
-    int _defaultLayer, _outlineLayer;
-    bool _active;
+    [Header("Raycasting")]
+    public Camera raycastCamera;
+    public LayerMask interactableMask;
+    public float maxDistance = 100f;
 
-    void Awake()
+    [Header("Optional: cursor center mode")]
+    public bool useScreenCenter = false;
+
+    HighlightEffect currentEffect;
+    Transform lastRoot;
+
+    void Update()
     {
-        _defaultLayer = gameObject.layer;
-        _outlineLayer = LayerMask.NameToLayer(outlineLayerName);
-        if (_outlineLayer < 0) Debug.LogError($"Layer '{outlineLayerName}' not found. Create it in Project Settings → Tags and Layers.");
+        if (raycastCamera == null) return;
+
+        // Get screen position
+        Vector3 screenPos;
+
+        if (useScreenCenter)
+        {
+            screenPos = new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f);
+        }
+        else
+        {
+            // Support both input backends
+#if ENABLE_INPUT_SYSTEM
+            if (Mouse.current == null) { ClearCurrent(); return; }
+            screenPos = Mouse.current.position.ReadValue();
+#else
+            screenPos = Input.mousePosition;
+#endif
+        }
+
+        Ray ray = raycastCamera.ScreenPointToRay(screenPos);
+
+        if (Physics.Raycast(ray, out RaycastHit hit, maxDistance, interactableMask, QueryTriggerInteraction.Ignore))
+        {
+            var root = hit.transform.root;
+
+            if (root != lastRoot)
+            {
+                ClearCurrent();
+
+                if (root.TryGetComponent<HighlightEffect>(out var he) ||
+                    hit.transform.TryGetComponent<HighlightEffect>(out he))
+                {
+                    he.highlighted = true;      // turn outline ON
+                    currentEffect = he;
+                    lastRoot = he.transform;
+                }
+            }
+        }
+        else
+        {
+            ClearCurrent();
+        }
     }
 
-    public void OnHoverEnter()
-    {
-        if (_active) return;
-        _active = true;
-        SetLayerRecursively(gameObject, _outlineLayer);
-    }
+    void OnDisable() => ClearCurrent();
 
-    public void OnHoverExit()
+    void ClearCurrent()
     {
-        if (!_active) return;
-        _active = false;
-        SetLayerRecursively(gameObject, _defaultLayer);
-    }
-
-    static void SetLayerRecursively(GameObject go, int layer)
-    {
-        go.layer = layer;
-        foreach (Transform t in go.transform) SetLayerRecursively(t.gameObject, layer);
+        if (currentEffect != null)
+        {
+            currentEffect.highlighted = false; // turn outline OFF
+            currentEffect = null;
+        }
+        lastRoot = null;
     }
 }
