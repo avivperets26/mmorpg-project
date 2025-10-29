@@ -31,8 +31,8 @@ public class InventoryUI : MonoBehaviour
     {
         // Support both old & new input systems
 #if ENABLE_INPUT_SYSTEM
-        if (Keyboard.current != null && Keyboard.current.iKey.wasPressedThisFrame)
-            Toggle();
+                if (Keyboard.current != null && Keyboard.current.iKey.wasPressedThisFrame)
+                    Toggle();
 #endif
         if (Input.GetKeyDown(toggleKey))
             Toggle();
