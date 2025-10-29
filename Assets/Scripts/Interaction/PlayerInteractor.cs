@@ -1,61 +1,59 @@
 using UnityEngine;
-
-#if ENABLE_INPUT_SYSTEM
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
-#endif
 
-/// Casts a ray from the camera through the mouse position each frame.
+/// Casts a ray from the camera through the mouse each frame:
 /// - Highlights anything with IHoverHighlight
-/// - Interacts with anything implementing IInteractable (click/E) if within distance
+/// - Interacts with IInteractable on Left Click or key (default: T) if in range
 public class PlayerInteractor : MonoBehaviour
 {
     [Header("Raycast")]
-    public LayerMask interactMask = ~0;      // or set to a dedicated "Interactable" layer
-    public float maxRayDistance = 100f;
+    [Tooltip("Layer(s) that can be interacted with.")]
+    [SerializeField] private LayerMask interactMask = ~0;
+    [SerializeField] private float maxRayDistance = 100f;
 
     [Header("Controls")]
-#if ENABLE_INPUT_SYSTEM
-    public Key interactKey = Key.E;
-#else
-    public KeyCode interactKeyLegacy = KeyCode.E;
-#endif
-    public bool allowMouseClick = true;
+    [Tooltip("Keyboard key that can trigger interaction (in addition to mouse).")]
+    [SerializeField] private Key interactKey = Key.T;
+    [SerializeField] private bool allowMouseClick = true;
 
-    Camera _cam;
-    IHoverHighlight _currentHighlight;
-    IInteractable _currentInteractable;
+    private Camera _cam;
+    private IHoverHighlight _currentHighlight;
+    private IInteractable _currentInteractable;
 
-    void Awake()
+    private void Awake()
     {
         _cam = Camera.main;
-        if (!_cam) Debug.LogWarning("PlayerInteractor: No Main Camera found (Camera.main is null).");
+        if (!_cam) Debug.LogWarning("PlayerInteractor: No Main Camera found.");
     }
 
-    void Update()
+    private void Update()
     {
-        if (!_cam) return;
+        if (_cam == null) return;
 
-        // --- 1) Raycast from mouse ---
-        Vector2 mousePos;
-#if ENABLE_INPUT_SYSTEM
-        mousePos = Mouse.current != null ? Mouse.current.position.ReadValue() : (Vector2)Input.mousePosition;
-#else
-        mousePos = Input.mousePosition;
-#endif
-        var ray = _cam.ScreenPointToRay(mousePos);
-        bool hitSomething = Physics.Raycast(ray, out var hit, maxRayDistance, interactMask, QueryTriggerInteraction.Ignore);
+        // 0) Don’t interact through UI
+        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+        {
+            ClearHoverIfAny();
+            return;
+        }
+
+        // 1) Raycast from mouse
+        Vector2 mousePos = Mouse.current != null ? Mouse.current.position.ReadValue() : Vector2.zero;
+        Ray ray = _cam.ScreenPointToRay(mousePos);
+
+        bool hit = Physics.Raycast(ray, out RaycastHit hitInfo, maxRayDistance, interactMask, QueryTriggerInteraction.Ignore);
 
         IHoverHighlight newHighlight = null;
         IInteractable newInteract = null;
 
-        if (hitSomething)
+        if (hit)
         {
-            // Use GetComponentInParent<T>() instead of non-existent TryGetComponentInParent
-            newHighlight = hit.collider.GetComponentInParent<IHoverHighlight>();
-            newInteract = hit.collider.GetComponentInParent<IInteractable>();
+            newHighlight = hitInfo.collider.GetComponentInParent<IHoverHighlight>();
+            newInteract = hitInfo.collider.GetComponentInParent<IInteractable>();
         }
 
-        // --- 2) Swap hover highlight if target changed ---
+        // 2) Swap hover highlight if changed
         if (!ReferenceEquals(newHighlight, _currentHighlight))
         {
             _currentHighlight?.OnHoverExit();
@@ -64,38 +62,33 @@ public class PlayerInteractor : MonoBehaviour
         }
         _currentInteractable = newInteract;
 
-        // --- 3) Confirm interaction (click or E) ---
+        // 3) Confirm interaction: Left mouse or key
         bool pressed = false;
-#if ENABLE_INPUT_SYSTEM
-        var kb = Keyboard.current;
-        var mouse = Mouse.current;
-        if (kb != null && kb[Key.T].wasPressedThisFrame) pressed = true;
-        if (allowMouseClick && mouse != null && mouse.rightButton.wasPressedThisFrame) pressed = true;
-#else
-        if (Input.GetKeyDown(KeyCode.T)) pressed = true;
-        if (allowMouseClick && Input.GetMouseButtonDown(1)) pressed = true; // 1 = right click
-#endif
+        if (Keyboard.current != null && Keyboard.current[interactKey].wasPressedThisFrame) pressed = true;
+        if (allowMouseClick && Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame) pressed = true;
 
+        if (!pressed || _currentInteractable == null) return;
 
-        if (pressed && _currentInteractable != null)
+        float dist = Vector3.Distance(transform.position, _currentInteractable.Transform.position);
+        if (dist <= _currentInteractable.MaxUseDistance)
         {
-            float dist = Vector3.Distance(transform.position, _currentInteractable.Transform.position);
-            if (dist <= _currentInteractable.MaxUseDistance)
-            {
-                _currentInteractable.Interact(gameObject);
-            }
-            else
-            {
-                // Optional: show "Too far" feedback
-                // Debug.Log("Too far to interact.");
-            }
+            _currentInteractable.Interact(gameObject);
         }
+        // else: optional “too far” feedback
     }
 
-    void OnDisable()
+    private void OnDisable()
     {
-        _currentHighlight?.OnHoverExit();
-        _currentHighlight = null;
+        ClearHoverIfAny();
         _currentInteractable = null;
+    }
+
+    private void ClearHoverIfAny()
+    {
+        if (_currentHighlight != null)
+        {
+            _currentHighlight.OnHoverExit();
+            _currentHighlight = null;
+        }
     }
 }

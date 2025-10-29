@@ -2,12 +2,12 @@ using UnityEngine;
 
 public interface IInteractable
 {
-    /// World-space position used to measure distance (usually the object’s transform).
+    /// Transform used to measure distance from the interactor (usually the root).
     Transform Transform { get; }
 
-    /// Max distance the interactor must be within to interact.
+    /// Max distance allowed for interaction (world units).
     float MaxUseDistance { get; }
 
-    /// Called when the player confirms interaction (click/E). Return true if consumed.
-    bool Interact(GameObject interactor);
+    /// Called when the player interacts (click / key).
+    void Interact(GameObject interactor);
 }

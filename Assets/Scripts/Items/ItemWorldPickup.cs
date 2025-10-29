@@ -1,10 +1,6 @@
 using UnityEngine;
 using TMPro;
 
-/// <summary>
-/// Generic world pickup for any ItemDefinition.
-/// Provides label setup, and implements IInteractable for inventory pickup.
-/// </summary>
 [RequireComponent(typeof(Collider))]
 public class ItemWorldPickup : MonoBehaviour, IInteractable
 {
@@ -23,7 +19,7 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
     void Reset()
     {
         var col = GetComponent<Collider>();
-        if (col) col.isTrigger = false; // we raycast; keep solid collider for click-hit. Trigger also works if you prefer.
+        if (col) col.isTrigger = false; // solid collider for click-raycast
     }
 
     void Awake()
@@ -35,20 +31,24 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
         }
     }
 
-    public bool Interact(GameObject interactor)
+    // Must match IInteractable: void, not bool
+    public void Interact(GameObject interactor)
     {
-        if (!def) return false;
+        if (!def) return;
 
         var inv = interactor.GetComponent<PlayerInventory>();
-        if (!inv) return false;
+        if (inv == null) return;
 
-        if (inv.TryAdd(def))
+        // Your inventory API — adjust as needed
+        bool added = inv.TryAdd(def);
+        if (added)
         {
+            // TODO: VFX/SFX if you want
             Destroy(gameObject);
-            return true;
         }
-
-        // Could show "Inventory full" UI here.
-        return false;
+        else
+        {
+            // Optional: show "Inventory full" feedback
+        }
     }
 }
