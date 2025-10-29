@@ -8,34 +8,32 @@ using UnityEngine.InputSystem;
 public class InventoryUI : MonoBehaviour
 {
     [Header("Wiring")]
-    [Tooltip("The whole inventory panel (the Image with your big background).")]
     public GameObject rootPanel;
-
-    [Tooltip("Optional: your X button. If assigned, it auto-wires to Hide().")]
     public Button closeButton;
 
-    [Header("Behavior")]
+    [Header("Behavior (Legacy Only)")]
     public KeyCode toggleKey = KeyCode.I;
+#if ENABLE_INPUT_SYSTEM
+    [Header("Behavior (New Input System)")]
+    [SerializeField] private Key toggleKeyNew = Key.I;
+#endif
 
     void Awake()
     {
-        if (closeButton != null)
-            closeButton.onClick.AddListener(Hide);
-
-        // Start closed
-        if (rootPanel != null)
-            rootPanel.SetActive(false);
+        if (closeButton != null) closeButton.onClick.AddListener(Hide);
+        if (rootPanel != null) rootPanel.SetActive(false);
     }
 
     void Update()
     {
-        // Support both old & new input systems
 #if ENABLE_INPUT_SYSTEM
-                if (Keyboard.current != null && Keyboard.current.iKey.wasPressedThisFrame)
-                    Toggle();
-#endif
+        var kb = Keyboard.current;
+        if (kb != null && kb[toggleKeyNew].wasPressedThisFrame)
+            Toggle();
+#else
         if (Input.GetKeyDown(toggleKey))
             Toggle();
+#endif
     }
 
     public void Toggle()
@@ -44,15 +42,6 @@ public class InventoryUI : MonoBehaviour
         rootPanel.SetActive(!rootPanel.activeSelf);
     }
 
-    public void Show()
-    {
-        if (!rootPanel) return;
-        rootPanel.SetActive(true);
-    }
-
-    public void Hide()
-    {
-        if (!rootPanel) return;
-        rootPanel.SetActive(false);
-    }
+    public void Show() { if (rootPanel) rootPanel.SetActive(true); }
+    public void Hide() { if (rootPanel) rootPanel.SetActive(false); }
 }
