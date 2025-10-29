@@ -34,21 +34,32 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
     // Must match IInteractable: void, not bool
     public void Interact(GameObject interactor)
     {
-        if (!def) return;
+        Debug.Log($"🪄 Interact called on {name}");
+
+        if (!def)
+        {
+            Debug.LogWarning("❌ Missing ItemDefinition!");
+            return;
+        }
 
         var inv = interactor.GetComponent<PlayerInventory>();
-        if (inv == null) return;
+        if (!inv)
+        {
+            Debug.LogWarning("❌ No PlayerInventory found on interactor!");
+            return;
+        }
 
-        // Your inventory API — adjust as needed
         bool added = inv.TryAdd(def);
+        Debug.Log($"📦 TryAdd result: {added}");
+
         if (added)
         {
-            // TODO: VFX/SFX if you want
+            Debug.Log($"✅ Picked up {def.displayName}");
             Destroy(gameObject);
         }
         else
         {
-            // Optional: show "Inventory full" feedback
+            Debug.Log("⚠️ Inventory full or add failed");
         }
     }
 }
