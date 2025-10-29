@@ -1,0 +1,31 @@
+fileFormatVersion: 2
+guid: 7d9febddae7f5d3488e53d93551509e5
+timeCreated: 1530022810
+licenseType: Store
+TrueTypeFontImporter:
+  serializedVersion: 4
+  fontSize: 16
+  forceTextureCase: -2
+  characterSpacing: 0
+  characterPadding: 1
+  includeFontData: 1
+  fontName: Noto Serif
+  fontNames:
+  - Noto Serif
+  fallbackFontReferences:
+  - {fileID: 12800000, guid: 1f2c3cb065112fc4397d49c28e77f417, type: 3}
+  - {fileID: 12800000, guid: 6d5fb205130586a46b301b7155d7cab1, type: 3}
+  - {fileID: 12800000, guid: 11376e4987e18be4fa79ba96c7b9e460, type: 3}
+  customCharacters: 
+  fontRenderingMode: 0
+  ascentCalculationMode: 1
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 20919
+  packageName: Yamato V3
+  packageVersion: 3.0
+  assetPath: Assets/My Production Line/Yamato V3/Fonts/Noto_Serif/NotoSerif-Italic.ttf
+  uploadId: 253109

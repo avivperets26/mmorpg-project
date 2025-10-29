@@ -1,0 +1,30 @@
+fileFormatVersion: 2
+guid: 7fb0c42e5713d1248ada1d451832973a
+timeCreated: 1530022810
+licenseType: Store
+TrueTypeFontImporter:
+  serializedVersion: 4
+  fontSize: 16
+  forceTextureCase: -2
+  characterSpacing: 0
+  characterPadding: 1
+  includeFontData: 1
+  fontName: Noto Sans
+  fontNames:
+  - Noto Sans
+  fallbackFontReferences:
+  - {fileID: 12800000, guid: 79491f02fb64afa45ac28f9e428977a7, type: 3}
+  - {fileID: 12800000, guid: 42f927326d01d0c41be3909210fc12f8, type: 3}
+  customCharacters: 
+  fontRenderingMode: 0
+  ascentCalculationMode: 1
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 20919
+  packageName: Yamato V3
+  packageVersion: 3.0
+  assetPath: Assets/My Production Line/Yamato V3/Fonts/Noto_Sans/NotoSans-Bold.ttf
+  uploadId: 253109

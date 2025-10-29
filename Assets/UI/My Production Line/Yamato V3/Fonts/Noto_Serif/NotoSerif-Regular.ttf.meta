@@ -1,0 +1,28 @@
+fileFormatVersion: 2
+guid: 11376e4987e18be4fa79ba96c7b9e460
+timeCreated: 1530022809
+licenseType: Store
+TrueTypeFontImporter:
+  serializedVersion: 4
+  fontSize: 16
+  forceTextureCase: -2
+  characterSpacing: 0
+  characterPadding: 1
+  includeFontData: 1
+  fontName: Noto Serif
+  fontNames:
+  - Noto Serif
+  fallbackFontReferences: []
+  customCharacters: 
+  fontRenderingMode: 0
+  ascentCalculationMode: 1
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 20919
+  packageName: Yamato V3
+  packageVersion: 3.0
+  assetPath: Assets/My Production Line/Yamato V3/Fonts/Noto_Serif/NotoSerif-Regular.ttf
+  uploadId: 253109

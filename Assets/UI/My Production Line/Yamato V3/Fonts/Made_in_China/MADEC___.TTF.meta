@@ -1,0 +1,28 @@
+fileFormatVersion: 2
+guid: b371f2f89338d744d8fccd940540bfe4
+timeCreated: 1530022810
+licenseType: Store
+TrueTypeFontImporter:
+  serializedVersion: 4
+  fontSize: 16
+  forceTextureCase: -2
+  characterSpacing: 0
+  characterPadding: 1
+  includeFontData: 1
+  fontName: Made in China
+  fontNames:
+  - Made in China
+  fallbackFontReferences: []
+  customCharacters: 
+  fontRenderingMode: 0
+  ascentCalculationMode: 1
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 20919
+  packageName: Yamato V3
+  packageVersion: 3.0
+  assetPath: Assets/My Production Line/Yamato V3/Fonts/Made_in_China/MADEC___.TTF
+  uploadId: 253109
