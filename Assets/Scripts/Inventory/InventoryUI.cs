@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-
+using UnityEngine.EventSystems;
 public class InventoryUI : MonoBehaviour
 {
     [Header("Wiring")]
@@ -13,6 +13,9 @@ public class InventoryUI : MonoBehaviour
     [Header("Preview")]
     [SerializeField] private Texture2D emptyTexture;        // optional background for empty cells
     [SerializeField] private int previewSize = 256;         // RT size per item preview (square)
+    [SerializeField] private InventoryDragController dragController; // optional drag controller
+    [HideInInspector] public InventoryItem dragHiddenItem;
+
 
     private int _cols, _rows;
     private RawImage[,] _cells;
@@ -42,6 +45,8 @@ public class InventoryUI : MonoBehaviour
     {
         // Kick off deferred init so PlayerInventory.Awake() can run first.
         StartCoroutine(InitWhenReady());
+        if (!dragController) dragController = GetComponent<InventoryDragController>();
+
     }
 
     private System.Collections.IEnumerator InitWhenReady()
@@ -151,80 +156,85 @@ public class InventoryUI : MonoBehaviour
         {
             var def = it.def;
             if (!def) continue;
+            if (dragHiddenItem == it) continue;
 
             // --- Footprint in cells ---
             int w = Mathf.Max(1, it.Width);
             int h = Mathf.Max(1, it.Height);
 
-            var cellSize = _grid.cellSize;
-            var spacing = _grid.spacing;
+            var cs = _grid.cellSize;
+            var sp = _grid.spacing;
 
-            // total pixel span of the footprint
-            float spanW = w * cellSize.x + (w - 1) * spacing.x;
-            float spanH = h * cellSize.y + (h - 1) * spacing.y;
+            float pitchX = cs.x + sp.x;
+            float pitchY = cs.y + sp.y;
 
-            // Ask renderer for a RT that matches the aspect of the footprint.
-            // Use previewSize per cell to keep good resolution.
+            // top-left of the footprint in grid space
+            float px = it.x * pitchX;
+            float py = it.y * pitchY;
+
+            // pixel size of the footprint
+            float spanW = w * cs.x + (w - 1) * sp.x;
+            float spanH = h * cs.y + (h - 1) * sp.y;
+
+            // Ask renderer for an RT that matches the footprint aspect
             int rtW = Mathf.Max(64, Mathf.RoundToInt(previewSize * w));
             int rtH = Mathf.Max(64, Mathf.RoundToInt(previewSize * h));
-
             var rt = ItemPreviewRenderer.Instance.Render(def, rtW, rtH);
             if (rt == null || !rt.IsCreated()) continue;
 
-            // --- Position a container over the footprint center ---
-            var tlCellRect = _cellRects[it.x, it.y];
-            Vector2 tlCenter = tlCellRect.anchoredPosition;
-            Vector2 toCenter = new Vector2((spanW - cellSize.x) * 0.5f, -(spanH - cellSize.y) * 0.5f);
-            Vector2 center = tlCenter + toCenter;
-
+            // --- Container over the footprint (top-left anchored) ---
             var container = new GameObject($"ItemView_{def.displayName}_Container", typeof(RectTransform));
             var contRect = container.GetComponent<RectTransform>();
             container.transform.SetParent(gridRoot, false);
 
+            // ignore layout
             var contLayout = container.AddComponent<UnityEngine.UI.LayoutElement>();
             contLayout.ignoreLayout = true;
 
-            contRect.anchorMin = tlCellRect.anchorMin;
-            contRect.anchorMax = tlCellRect.anchorMax;
-            contRect.pivot = tlCellRect.pivot;          // typically 0.5,0.5
-            contRect.sizeDelta = new Vector2(spanW, spanH); // EXACT footprint (e.g., 1×3)
-            if (def.preview != null)
-            {
-                contRect.anchoredPosition += def.preview.uiOffsetPx;
-            }
+            // anchor to grid top-left so math matches footprint preview
+            contRect.anchorMin = Vector2.up;   // (0,1)
+            contRect.anchorMax = Vector2.up;
+            contRect.pivot = new Vector2(0f, 1f);
+
+            // EXACT footprint size
+            contRect.sizeDelta = new Vector2(spanW, spanH);
+
+            // place container so its center is at the footprint center
+            contRect.anchoredPosition = new Vector2(px + spanW * 0.5f, -(py + spanH * 0.5f));
+
+            // optional 2D nudge
+            if (def.preview != null) contRect.anchoredPosition += def.preview.uiOffsetPx;
+
             contRect.localRotation = Quaternion.identity;
 
-            // --- RawImage child that just fills the footprint (no squashing now) ---
+            // --- RawImage child filling the container ---
             var imgGO = new GameObject("Image", typeof(RectTransform), typeof(RawImage));
             imgGO.transform.SetParent(container.transform, false);
 
             var imgRect = imgGO.GetComponent<RectTransform>();
             var ivRaw = imgGO.GetComponent<RawImage>();
 
-            // Fill container
             imgRect.anchorMin = Vector2.zero;
             imgRect.anchorMax = Vector2.one;
             imgRect.pivot = new Vector2(0.5f, 0.5f);
             imgRect.offsetMin = Vector2.zero;
             imgRect.offsetMax = Vector2.zero;
-            imgRect.localRotation = Quaternion.identity;
 
-            ivRaw.texture = rt;     // RT already has the correct aspect
+            ivRaw.texture = rt;
             ivRaw.color = Color.white;
-            ivRaw.raycastTarget = true;  // <-- enable hit tests so hover works
+            ivRaw.raycastTarget = true;
 
+            // hover + drag hookup (unchanged)
             var hover = imgGO.AddComponent<ItemPreviewHover>();
-            hover.def = def;
-            hover.rtWidth = rtW;
-            hover.rtHeight = rtH;
-            hover.initialStaticTexture = rt;
-            // Optionally tweak speeds:
-            hover.spinDegreesPerSecond = 40f;
-            hover.returnDegreesPerSecond = 180f;
+            hover.def = def; hover.rtWidth = rtW; hover.rtHeight = rtH; hover.initialStaticTexture = rt;
+            hover.spinDegreesPerSecond = 40f; hover.returnDegreesPerSecond = 180f;
 
-            // draw on top
+            var view = imgGO.AddComponent<InventoryItemView>();
+            view.item = it; view.container = contRect; view.raw = ivRaw; view.dragCtrl = dragController; view.previewTexture = rt;
+
             contRect.SetAsLastSibling();
             _itemViews.Add(container);
+
 
             // Optional: dim covered cells
             for (int dy = 0; dy < h; dy++)
@@ -238,6 +248,38 @@ public class InventoryUI : MonoBehaviour
 
     }
 
+    // --- Cell highlighting (used during drag preview) ---
+    public void HighlightCells(int x, int y, int w, int h, Color color)
+    {
+        if (_cells == null) return;
+        for (int dy = 0; dy < h; dy++)
+            for (int dx = 0; dx < w; dx++)
+            {
+                int cx = x + dx;
+                int cy = y + dy;
+                if (cx < 0 || cx >= _cols || cy < 0 || cy >= _rows) continue;
+                _cells[cx, cy].color = color;
+            }
+    }
+
+    public void ClearHighlights()
+    {
+        if (_cells == null) return;
+        for (int y = 0; y < _rows; y++)
+            for (int x = 0; x < _cols; x++)
+            {
+                var raw = _cells[x, y];
+                if (emptyTexture)
+                {
+                    raw.texture = emptyTexture;
+                    raw.color = Color.white;
+                }
+                else
+                {
+                    raw.color = new Color(1f, 1f, 1f, 0f);
+                }
+            }
+    }
 
 
     private void ClearItemViews()
