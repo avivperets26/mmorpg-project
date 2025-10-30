@@ -1,62 +1,86 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-[System.Serializable]
-public class InventoryItem
-{
-    public ItemDefinition def;
-    public int x;        // top-left cell
-    public int y;
-    public bool rotated; // rotate 90° (optional, for later with 'R')
-}
-
+[Serializable]
 public class InventoryData
 {
-    public int width;
-    public int height;
-    public bool[,] occupied;
-    public List<InventoryItem> items = new();
+    public readonly int width;
+    public readonly int height;
+
+    // Occupancy map: null = empty; non-null = reference to occupying InventoryItem
+    private readonly InventoryItem[,] _cells;
 
     public InventoryData(int w, int h)
     {
-        width = w; height = h;
-        occupied = new bool[w, h];
+        width = Mathf.Max(1, w);
+        height = Mathf.Max(1, h);
+        _cells = new InventoryItem[width, height];
     }
 
-    public bool CanPlace(ItemDefinition def, int px, int py, bool rotated)
+    /// <summary>Checks bounds & empty cells for the item's rectangle at its (x,y).</summary>
+    public bool CanPlace(InventoryItem it)
     {
-        int w = rotated ? def.height : def.width;
-        int h = rotated ? def.width : def.height;
-        if (px < 0 || py < 0 || px + w > width || py + h > height) return false;
+        if (it == null || it.def == null) return false;
 
-        for (int x = px; x < px + w; x++)
-            for (int y = py; y < py + h; y++)
-                if (occupied[x, y]) return false;
+        // Bounds
+        if (it.x < 0 || it.y < 0) return false;
+        if (it.x + it.Width > width) return false;
+        if (it.y + it.Height > height) return false;
+
+        // Empty cells
+        for (int yy = 0; yy < it.Height; yy++)
+            for (int xx = 0; xx < it.Width; xx++)
+                if (_cells[it.x + xx, it.y + yy] != null)
+                    return false;
 
         return true;
     }
 
+    /// <summary>Writes the item into the grid if possible.</summary>
     public bool Place(InventoryItem it)
     {
-        if (!CanPlace(it.def, it.x, it.y, it.rotated)) return false;
+        if (!CanPlace(it)) return false;
 
-        int w = it.rotated ? it.def.height : it.def.width;
-        int h = it.rotated ? it.def.width : it.def.height;
-        for (int x = it.x; x < it.x + w; x++)
-            for (int y = it.y; y < it.y + h; y++)
-                occupied[x, y] = true;
+        for (int yy = 0; yy < it.Height; yy++)
+            for (int xx = 0; xx < it.Width; xx++)
+                _cells[it.x + xx, it.y + yy] = it;
 
-        items.Add(it);
         return true;
     }
 
+    /// <summary>Clears the item's cells from the grid (if present).</summary>
     public void Remove(InventoryItem it)
     {
-        int w = it.rotated ? it.def.height : it.def.width;
-        int h = it.rotated ? it.def.width : it.def.height;
-        for (int x = it.x; x < it.x + w; x++)
-            for (int y = it.y; y < it.y + h; y++)
-                occupied[x, y] = false;
-        items.Remove(it);
+        if (it == null) return;
+
+        // Only clear cells that actually reference this item
+        for (int yy = 0; yy < it.Height; yy++)
+            for (int xx = 0; xx < it.Width; xx++)
+            {
+                int gx = it.x + xx;
+                int gy = it.y + yy;
+                if (gx >= 0 && gx < width && gy >= 0 && gy < height)
+                {
+                    if (_cells[gx, gy] == it)
+                        _cells[gx, gy] = null;
+                }
+            }
+    }
+
+    /// <summary>Returns the item occupying a given cell, or null if empty.</summary>
+    public InventoryItem GetAt(int x, int y)
+    {
+        if (x < 0 || x >= width || y < 0 || y >= height) return null;
+        return _cells[x, y];
+    }
+
+    /// <summary>Enumerates all cells occupied by a given item.</summary>
+    public IEnumerable<Vector2Int> CellsOf(InventoryItem it)
+    {
+        if (it == null) yield break;
+        for (int yy = 0; yy < it.Height; yy++)
+            for (int xx = 0; xx < it.Width; xx++)
+                yield return new Vector2Int(it.x + xx, it.y + yy);
     }
 }

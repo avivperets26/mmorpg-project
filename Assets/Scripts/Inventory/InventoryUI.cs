@@ -7,17 +7,19 @@ public class InventoryUI : MonoBehaviour
 {
     [Header("Wiring")]
     [SerializeField] private PlayerInventory inventory;     // drag Player Gameplay Object
-    [SerializeField] private RectTransform gridRoot;        // InventoryPanel/GridRoot
-    [SerializeField] private GameObject slotPrefab;         // Slot prefab with RawImage (for empty cells)
+    [SerializeField] private RectTransform gridRoot;        // InventoryPanel/GridRoot (with GridLayoutGroup)
+    [SerializeField] private GameObject slotPrefab;         // Slot prefab (must have RawImage component)
 
     [Header("Preview")]
-    [SerializeField] private Texture2D emptyTexture;        // optional background for empty slots
-    [SerializeField] private int previewSize = 256;         // RT size per item preview
+    [SerializeField] private Texture2D emptyTexture;        // optional background for empty cells
+    [SerializeField] private int previewSize = 256;         // RT size per item preview (square)
 
     private int _cols, _rows;
     private RawImage[,] _cells;
     private RectTransform[,] _cellRects;
     private GridLayoutGroup _grid;
+
+    private bool _built;
 
     // Item views that span multiple cells
     private readonly List<GameObject> _itemViews = new();
@@ -27,29 +29,51 @@ public class InventoryUI : MonoBehaviour
         if (!inventory)
         {
 #if UNITY_2023_1_OR_NEWER
-            inventory = Object.FindFirstObjectByType<PlayerInventory>();
+        inventory = Object.FindFirstObjectByType<PlayerInventory>();
 #else
             inventory = Object.FindObjectOfType<PlayerInventory>();
 #endif
         }
 
+        // Do NOT access inventory.Data here; it may not be ready yet.
+    }
+
+    private void Start()
+    {
+        // Kick off deferred init so PlayerInventory.Awake() can run first.
+        StartCoroutine(InitWhenReady());
+    }
+
+    private System.Collections.IEnumerator InitWhenReady()
+    {
+        // Wait until we have an inventory component
+        while (inventory == null) yield return null;
+
+        // Wait until PlayerInventory created its Data (done in its Awake)
+        while (inventory.Data == null) yield return null;
+
         _cols = inventory.Data.width;
         _rows = inventory.Data.height;
 
-        _grid = gridRoot.GetComponent<GridLayoutGroup>();
+        _grid = gridRoot ? gridRoot.GetComponent<GridLayoutGroup>() : null;
         if (_grid == null)
         {
-            Debug.LogError("GridRoot must have a GridLayoutGroup.");
-            return;
+            Debug.LogError("[InventoryUI] GridRoot must have a GridLayoutGroup.");
+            yield break;
         }
 
         BuildGrid();
+        _built = true;
+
+        // now safe to subscribe & draw
+        inventory.Changed += Refresh;
+        Refresh();
     }
+
 
     private void OnEnable()
     {
-        if (inventory != null) inventory.Changed += Refresh;
-        Refresh();
+        if (_built) Refresh();
     }
 
     private void OnDisable()
@@ -60,15 +84,15 @@ public class InventoryUI : MonoBehaviour
 
     private void BuildGrid()
     {
-        // Clear
+        // Clear previous slots
         for (int i = gridRoot.childCount - 1; i >= 0; i--)
             Destroy(gridRoot.GetChild(i).gameObject);
 
         _cells = new RawImage[_cols, _rows];
         _cellRects = new RectTransform[_cols, _rows];
 
-        // Create slots (transparent by default)
         for (int y = 0; y < _rows; y++)
+        {
             for (int x = 0; x < _cols; x++)
             {
                 var go = Instantiate(slotPrefab, gridRoot);
@@ -77,7 +101,7 @@ public class InventoryUI : MonoBehaviour
                 var raw = go.GetComponent<RawImage>();
                 if (!raw) raw = go.AddComponent<RawImage>();
 
-                // EMPTY = transparent (fixes the white tiles)
+                // EMPTY = transparent or provided texture
                 if (emptyTexture != null)
                 {
                     raw.texture = emptyTexture;
@@ -93,21 +117,22 @@ public class InventoryUI : MonoBehaviour
                 _cells[x, y] = raw;
                 _cellRects[x, y] = go.GetComponent<RectTransform>();
             }
+        }
     }
 
     public void Refresh()
     {
-        if (_cells == null) return;
+        if (!_built || _cells == null || inventory == null) return;
 
-        // 1) Clear existing item views (spanning images)
+        // 1) Clear previous overlays
         ClearItemViews();
 
-        // 2) Reset empty cell visuals
+        // 2) Reset all cells
         for (int y = 0; y < _rows; y++)
             for (int x = 0; x < _cols; x++)
             {
                 var raw = _cells[x, y];
-                if (emptyTexture != null)
+                if (emptyTexture)
                 {
                     raw.texture = emptyTexture;
                     raw.color = Color.white;
@@ -120,83 +145,100 @@ public class InventoryUI : MonoBehaviour
                 raw.uvRect = new Rect(0, 0, 1, 1);
             }
 
-        Debug.Log($"[InventoryUI] Refresh. Items={inventory.Items.Count}");
-
-        // 3) Create a single preview RawImage per item that SPANS its footprint
+        // 3) One preview per placed item
+        // 3) One preview per placed item
         foreach (var it in inventory.Items)
         {
-            int x = it.x, y = it.y;
-            if (x < 0 || x >= _cols || y < 0 || y >= _rows) continue;
-
             var def = it.def;
-            if (def == null)
-            {
-                Debug.LogWarning("[InventoryUI] Item has null def.");
-                continue;
-            }
+            if (!def) continue;
 
-            Debug.Log($"[InventoryUI] Draw '{def.displayName}' at ({x},{y}) size {def.width}x{def.height}");
-            // Render the 3D preview once
-            var rt = ItemPreviewRenderer.Instance.Render(def, previewSize);
-            if (rt == null || !rt.IsCreated())
-            {
-                Debug.LogWarning("[InventoryUI] RenderTexture missing/failed.");
-                continue;
-            }
-            // Create view GO (child of gridRoot, but ignored by GridLayout)
-            var ivGO = new GameObject($"ItemView_{def.displayName}", typeof(RectTransform), typeof(RawImage));
-            ivGO.transform.SetParent(gridRoot, false);
+            // --- Footprint in cells ---
+            int w = Mathf.Max(1, it.Width);
+            int h = Mathf.Max(1, it.Height);
 
-            // 👇 IMPORTANT: ignore GridLayout sizing/positioning
-            var layout = ivGO.AddComponent<UnityEngine.UI.LayoutElement>();
-            layout.ignoreLayout = true;
-
-            var ivRect = ivGO.GetComponent<RectTransform>();
-            var ivRaw = ivGO.GetComponent<RawImage>();
-            ivRaw.texture = rt;
-            ivRaw.color = Color.white;
-            ivRaw.raycastTarget = false;
-            ivRaw.material = null; // allow default
-            ivRaw.color = Color.white; // keep model colors
-
-            // Size = width×height cells (include spacing)
             var cellSize = _grid.cellSize;
             var spacing = _grid.spacing;
-            int w = Mathf.Max(1, def.width);
-            int h = Mathf.Max(1, def.height);
 
-            float width = w * cellSize.x + (w - 1) * spacing.x;
-            float height = h * cellSize.y + (h - 1) * spacing.y;
-            ivRect.sizeDelta = new Vector2(width, height);
+            // total pixel span of the footprint
+            float spanW = w * cellSize.x + (w - 1) * spacing.x;
+            float spanH = h * cellSize.y + (h - 1) * spacing.y;
 
-            // Position = top-left cell position (same parent)
-            // Ensure we copy the same anchors/pivot so anchoredPosition matches
-            var topLeftCell = _cellRects[x, y];
-            ivRect.anchorMin = topLeftCell.anchorMin;
-            ivRect.anchorMax = topLeftCell.anchorMax;
-            ivRect.pivot = topLeftCell.pivot;
-            ivRect.anchoredPosition = topLeftCell.anchoredPosition;
+            // Ask renderer for a RT that matches the aspect of the footprint.
+            // Use previewSize per cell to keep good resolution.
+            int rtW = Mathf.Max(64, Mathf.RoundToInt(previewSize * w));
+            int rtH = Mathf.Max(64, Mathf.RoundToInt(previewSize * h));
 
-            // Keep on top
-            ivRect.SetAsLastSibling();
+            var rt = ItemPreviewRenderer.Instance.Render(def, rtW, rtH);
+            if (rt == null || !rt.IsCreated()) continue;
 
-            _itemViews.Add(ivGO);
+            // --- Position a container over the footprint center ---
+            var tlCellRect = _cellRects[it.x, it.y];
+            Vector2 tlCenter = tlCellRect.anchoredPosition;
+            Vector2 toCenter = new Vector2((spanW - cellSize.x) * 0.5f, -(spanH - cellSize.y) * 0.5f);
+            Vector2 center = tlCenter + toCenter;
 
+            var container = new GameObject($"ItemView_{def.displayName}_Container", typeof(RectTransform));
+            var contRect = container.GetComponent<RectTransform>();
+            container.transform.SetParent(gridRoot, false);
 
-            // Optionally tint covered cells slightly so the footprint is clear
+            var contLayout = container.AddComponent<UnityEngine.UI.LayoutElement>();
+            contLayout.ignoreLayout = true;
+
+            contRect.anchorMin = tlCellRect.anchorMin;
+            contRect.anchorMax = tlCellRect.anchorMax;
+            contRect.pivot = tlCellRect.pivot;          // typically 0.5,0.5
+            contRect.sizeDelta = new Vector2(spanW, spanH); // EXACT footprint (e.g., 1×3)
+            if (def.preview != null)
+            {
+                contRect.anchoredPosition += def.preview.uiOffsetPx;
+            }
+            contRect.localRotation = Quaternion.identity;
+
+            // --- RawImage child that just fills the footprint (no squashing now) ---
+            var imgGO = new GameObject("Image", typeof(RectTransform), typeof(RawImage));
+            imgGO.transform.SetParent(container.transform, false);
+
+            var imgRect = imgGO.GetComponent<RectTransform>();
+            var ivRaw = imgGO.GetComponent<RawImage>();
+
+            // Fill container
+            imgRect.anchorMin = Vector2.zero;
+            imgRect.anchorMax = Vector2.one;
+            imgRect.pivot = new Vector2(0.5f, 0.5f);
+            imgRect.offsetMin = Vector2.zero;
+            imgRect.offsetMax = Vector2.zero;
+            imgRect.localRotation = Quaternion.identity;
+
+            ivRaw.texture = rt;     // RT already has the correct aspect
+            ivRaw.color = Color.white;
+            ivRaw.raycastTarget = true;  // <-- enable hit tests so hover works
+
+            var hover = imgGO.AddComponent<ItemPreviewHover>();
+            hover.def = def;
+            hover.rtWidth = rtW;
+            hover.rtHeight = rtH;
+            hover.initialStaticTexture = rt;
+            // Optionally tweak speeds:
+            hover.spinDegreesPerSecond = 40f;
+            hover.returnDegreesPerSecond = 180f;
+
+            // draw on top
+            contRect.SetAsLastSibling();
+            _itemViews.Add(container);
+
+            // Optional: dim covered cells
             for (int dy = 0; dy < h; dy++)
                 for (int dx = 0; dx < w; dx++)
                 {
-                    int cx = x + dx, cy = y + dy;
+                    int cx = it.x + dx, cy = it.y + dy;
                     if (cx < 0 || cx >= _cols || cy < 0 || cy >= _rows) continue;
-
-                    var bg = _cells[cx, cy];
-                    bg.color = new Color(0f, 0f, 0f, 0.5f);  // black @ 50% opacity
+                    _cells[cx, cy].color = new Color(0f, 0f, 0f, 0.5f);
                 }
-            Debug.Log($"[InventoryUI] ItemView created size {ivRect.sizeDelta} pos {ivRect.anchoredPosition}");
-
         }
+
     }
+
+
 
     private void ClearItemViews()
     {
