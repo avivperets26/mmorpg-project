@@ -3,8 +3,14 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
 public class InventoryUI : MonoBehaviour
 {
+    [Header("Panel / Input Lock")]
+    [SerializeField] private GameObject inventoryPanel; // drag InventoryPanel root
+    [SerializeField] private PlayerInput playerInput;   // drag the Player's PlayerInput
+    [SerializeField] private Behaviour cinInput;   // <- generic, no Cinemachine namespace
+
     [Header("Wiring")]
     [SerializeField] private PlayerInventory inventory;     // drag Player Gameplay Object
     [SerializeField] private RectTransform gridRoot;        // InventoryPanel/GridRoot (with GridLayoutGroup)
@@ -23,31 +29,44 @@ public class InventoryUI : MonoBehaviour
     private GridLayoutGroup _grid;
 
     private bool _built;
+    private bool isOpen;
 
     // Item views that span multiple cells
     private readonly List<GameObject> _itemViews = new();
 
+    private InputAction moveAction, lookAction, dodgeAction, attackAction, moveClickAction;
+
     private void Awake()
     {
-        if (!inventory)
-        {
+        // Auto-find PlayerInput if not assigned
+        if (playerInput == null)
 #if UNITY_2023_1_OR_NEWER
-        inventory = Object.FindFirstObjectByType<PlayerInventory>();
+            playerInput = Object.FindFirstObjectByType<PlayerInput>();
 #else
-            inventory = Object.FindObjectOfType<PlayerInventory>();
+            playerInput = Object.FindObjectOfType<PlayerInput>();
 #endif
-        }
-
-        // Do NOT access inventory.Data here; it may not be ready yet.
     }
+
 
     private void Start()
     {
-        // Kick off deferred init so PlayerInventory.Awake() can run first.
-        StartCoroutine(InitWhenReady());
-        if (!dragController) dragController = GetComponent<InventoryDragController>();
+        // cache input actions (your existing code)
+        if (playerInput && playerInput.actions != null)
+        {
+            var a = playerInput.actions;
+            moveAction = a.FindAction("Move");
+            lookAction = a.FindAction("Look");
+            dodgeAction = a.FindAction("Dodge");
+            attackAction = a.FindAction("PrimaryAttack");
+            moveClickAction = a.FindAction("MoveClick");
+        }
 
+        // ⬇️ this line is required to build the cell grid & hook events
+        StartCoroutine(InitWhenReady());
+
+        if (!dragController) dragController = GetComponent<InventoryDragController>();
     }
+
 
     private System.Collections.IEnumerator InitWhenReady()
     {
@@ -73,6 +92,52 @@ public class InventoryUI : MonoBehaviour
         // now safe to subscribe & draw
         inventory.Changed += Refresh;
         Refresh();
+    }
+
+    public void Toggle() { if (isOpen) Close(); else Open(); }
+
+
+    public void Open()
+    {
+        if (isOpen) return;
+        isOpen = true;
+
+        if (inventoryPanel) inventoryPanel.SetActive(true);
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
+
+        // Preferred: switch to UI map if it exists
+        if (playerInput && playerInput.actions.FindActionMap("UI") != null)
+            playerInput.SwitchCurrentActionMap("UI");
+
+        // Hard stop gameplay actions regardless of maps
+        moveAction?.Disable();
+        lookAction?.Disable();
+        dodgeAction?.Disable();
+        attackAction?.Disable();
+        moveClickAction?.Disable();
+
+        if (cinInput) cinInput.enabled = false;
+    }
+
+    public void Close()
+    {
+        if (!isOpen) return;
+        isOpen = false;
+
+        if (inventoryPanel) inventoryPanel.SetActive(false);
+
+        if (playerInput && playerInput.actions.FindActionMap("Gameplay") != null)
+            playerInput.SwitchCurrentActionMap("Gameplay");
+
+        // Re-enable actions
+        moveAction?.Enable();
+        lookAction?.Enable();
+        dodgeAction?.Enable();
+        attackAction?.Enable();
+        moveClickAction?.Enable();
+
+        if (cinInput) cinInput.enabled = true;
     }
 
 

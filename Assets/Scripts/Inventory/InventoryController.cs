@@ -12,6 +12,8 @@ public class InventoryController : MonoBehaviour
     [Header("Behavior")]
     [SerializeField] private bool startHidden = true;
     [SerializeField] private Key toggleKey = Key.I; // New Input System key
+    [SerializeField] private InventoryUI inventoryUI; // <-- drag the same component
+
 
     private void Awake()
     {
@@ -27,13 +29,16 @@ public class InventoryController : MonoBehaviour
         if (closeButton != null)
             closeButton.onClick.RemoveListener(Hide);
     }
-
-    private void Update()
+    void Start()
     {
-        // Toggle with keyboard
-        var kb = Keyboard.current;
-        if (kb != null && kb[toggleKey].wasPressedThisFrame)
-            Toggle();
+        if (startHidden) inventoryUI.Close(); else inventoryUI.Open();
+        if (closeButton) closeButton.onClick.AddListener(inventoryUI.Close);
+    }
+
+    void Update()
+    {
+        if (Keyboard.current[toggleKey].wasPressedThisFrame)
+            inventoryUI.Toggle();
     }
 
     public void Show()

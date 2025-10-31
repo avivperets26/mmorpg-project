@@ -1,64 +1,72 @@
-// Assets/Scripts/Inventory/CharacterPreviewController.cs
 using UnityEngine;
 using UnityEngine.UI;
-using UnityEngine.EventSystems;
 
+/// <summary>
+/// Displays a static live preview of the player model (no interaction).
+/// - Renders a visual-only clone onto a RenderTexture shown in a RawImage.
+/// - Recenters the clone by its bounds so feet are at y=0 and x/z are centered.
+/// - Faces the camera using initialYaw + modelYawOffset (set 180 if prefab faces -Z).
+/// </summary>
 [RequireComponent(typeof(RawImage))]
-public class CharacterPreviewController : MonoBehaviour, IBeginDragHandler, IDragHandler, IScrollHandler
+public class CharacterPreviewController : MonoBehaviour
 {
     [Header("Wiring")]
-    [SerializeField] private Camera previewCameraPrefab;    // a prefab with clear flags: Solid Color, CullingMask: InventoryPreview
-    [SerializeField] private GameObject playerPrefab;       // your player visual prefab (no input/AI needed)
-    [SerializeField] private Light previewLightPrefab;      // optional, set layer to InventoryPreview
+    [SerializeField] private Camera previewCameraPrefab;   // Solid Color, culling mask will be set here
+    [SerializeField] private GameObject playerPrefab;      // visual-only prefab (no input/AI)
+    [SerializeField] private Light previewLightPrefab;     // optional
 
     [Header("Render Texture")]
     [SerializeField] private int rtWidth = 1024;
     [SerializeField] private int rtHeight = 1024;
 
-    [Header("Camera Rig")]
-    [SerializeField] private Vector3 cameraOffset = new Vector3(0f, 1.6f, 2.2f); // behind & above, looking at chest
-    [SerializeField] private float yaw = 180f;     // spin around Y
-    [SerializeField] private float pitch = 5f;     // look slightly down/up
-    [SerializeField] private float minPitch = -20f;
-    [SerializeField] private float maxPitch = 35f;
-    [SerializeField] private float distance = 2.2f;
-    [SerializeField] private float minDistance = 1.2f;
-    [SerializeField] private float maxDistance = 3.5f;
+    [Header("Camera Framing")]
+    [SerializeField] private Vector3 cameraOffset = new Vector3(0f, 1.7f, 0f); // chest-ish look-at
+    [SerializeField] private float distance = 2.4f;
+    [Tooltip("0 = face camera, 180 = back to camera")]
+    [SerializeField] private float initialYaw = 0f;
+    [Tooltip("Use 180 if your prefab faces -Z in authoring; 0 if it faces +Z")]
+    [SerializeField] private float modelYawOffset = 180f;
 
-    [Header("Mouse Controls")]
-    [SerializeField] private float dragSensitivity = 0.25f; // degrees per pixel
-    [SerializeField] private float scrollSensitivity = 0.25f;
+    [Header("Layering")]
     [SerializeField] private string previewLayerName = "InventoryPreview";
+
+    [Header("Framing")]
+    [Range(0f, 0.5f)][SerializeField] private float framePadding = 0.12f; // 12% margin
+    [Range(0.5f, 2f)][SerializeField] private float zoom = 1.0f; // >1 = bigger, <1 = smaller
+
+
     private int _previewLayer;
     private RawImage _raw;
     private Camera _cam;
     private RenderTexture _rt;
-    private Transform _pivot;            // look-at pivot
-    private GameObject _clone;           // player clone with visuals only
-    private Vector2 _lastDragPos;
-    private bool _dragging;
+    private Transform _pivot;
+    private GameObject _clone;
+    private Bounds _modelBoundsLocal;
 
-    void Awake()
+    private void Awake()
     {
         _raw = GetComponent<RawImage>();
         _previewLayer = LayerMask.NameToLayer(previewLayerName);
 
-        // Setup RT
-        _rt = new RenderTexture(rtWidth, rtHeight, 24, RenderTextureFormat.ARGB32);
-        _rt.name = "CharacterPreviewRT";
+        // RenderTexture target for the RawImage
+        _rt = new RenderTexture(rtWidth, rtHeight, 24, RenderTextureFormat.ARGB32)
+        {
+            name = "CharacterPreviewRT"
+        };
         _rt.Create();
         _raw.texture = _rt;
 
-        // Spawn tiny preview scene under this UI object
+        // Mini-scene root (childed under this UI object for convenience)
         var root = new GameObject("PreviewRoot");
         root.transform.SetParent(transform, false);
         root.layer = _previewLayer;
 
+        // Pivot (we’ll rotate/position relative to this)
         _pivot = new GameObject("Pivot").transform;
         _pivot.SetParent(root.transform, false);
         _pivot.localPosition = Vector3.zero;
 
-        // Light (optional)
+        // Optional light
         if (previewLightPrefab)
         {
             var l = Instantiate(previewLightPrefab, root.transform);
@@ -72,110 +80,125 @@ public class CharacterPreviewController : MonoBehaviour, IBeginDragHandler, IDra
         _cam.cullingMask = 1 << _previewLayer;
         _cam.targetTexture = _rt;
 
-        // Clone player (visuals only)
+        // Visual-only clone
         _clone = Instantiate(playerPrefab, _pivot);
         SetLayerRecursively(_clone, _previewLayer);
-        StripRuntimeScripts(_clone); // keep only renderers/animator
+        StripRuntimeScripts(_clone);     // keep only renderers/animators/etc.
+        CenterCloneOnBounds(_clone.transform, out _modelBoundsLocal);
+        // Make character face the camera (camera will be at world -Z looking toward +Z)
+        // If prefab faces +Z in authoring → modelYawOffset = 0; if it faces -Z → 180.
+        float totalYaw = 180f + initialYaw + modelYawOffset;
+        _pivot.localRotation = Quaternion.Euler(0f, totalYaw, 0f);
 
-        // Pose camera
-        RepositionCamera();
+        // Position & aim camera (decoupled from model yaw)
+        PositionCamera();
+        AutoFrame(); // ensure full body fits with padding
     }
 
-    void OnEnable()
+    private void PositionCamera()
     {
-        // Optional: if you have an equipment system, subscribe here to mirror gear.
-        // EquipmentBus.OnEquipped += MirrorEquipment;
-        // EquipmentBus.OnUnequipped += MirrorEquipment;
-        MirrorFromLivePlayer(); // initial sync
+        Vector3 target = _pivot.position + cameraOffset;
+
+        // IMPORTANT: place the camera in world space, independent of the pivot rotation.
+        // Camera sits on -Z and looks at target → model must face -Z to look at the camera.
+        _cam.transform.position = target + Vector3.back * distance;
+        _cam.transform.rotation = Quaternion.LookRotation(target - _cam.transform.position, Vector3.up);
     }
 
-    void OnDisable()
-    {
-        // EquipmentBus.OnEquipped -= MirrorEquipment;
-        // EquipmentBus.OnUnequipped -= MirrorEquipment;
-    }
-
-    void OnDestroy()
-    {
-        if (_rt != null)
-        {
-            _cam.targetTexture = null;
-            _rt.Release();
-            Destroy(_rt);
-        }
-    }
-
-    // === Input ===
-    public void OnBeginDrag(PointerEventData e)
-    {
-        _dragging = true;
-        _lastDragPos = e.position;
-    }
-
-    public void OnDrag(PointerEventData e)
-    {
-        if (!_dragging) return;
-        var delta = e.position - _lastDragPos;
-        _lastDragPos = e.position;
-
-        // Rotate UP/DOWN (pitch) and a little Yaw
-        pitch = Mathf.Clamp(pitch - delta.y * dragSensitivity, minPitch, maxPitch);
-        yaw += delta.x * dragSensitivity;
-
-        RepositionCamera();
-    }
-
-    public void OnScroll(PointerEventData e)
-    {
-        distance = Mathf.Clamp(distance - e.scrollDelta.y * scrollSensitivity, minDistance, maxDistance);
-        RepositionCamera();
-    }
-
-    private void RepositionCamera()
-    {
-        // Orbit around pivot using yaw/pitch/distance
-        var rot = Quaternion.Euler(pitch, yaw, 0f);
-        var dir = rot * Vector3.back; // back from pivot
-        _cam.transform.position = _pivot.position + dir * distance + cameraOffset;
-        _cam.transform.rotation = Quaternion.LookRotation((_pivot.position + cameraOffset) - _cam.transform.position, Vector3.up);
-    }
-
-    // === Syncing ===
-    private void MirrorFromLivePlayer()
-    {
-        // If you have a live Player root in scene, copy Animator avatar + current equipment
-        var live = GameObject.FindWithTag("Player");
-        if (!live) return;
-
-        var liveAnimator = live.GetComponentInChildren<Animator>();
-        var cloneAnimator = _clone.GetComponentInChildren<Animator>();
-        if (liveAnimator && cloneAnimator)
-        {
-            cloneAnimator.runtimeAnimatorController = liveAnimator.runtimeAnimatorController;
-            cloneAnimator.avatar = liveAnimator.avatar;
-            cloneAnimator.Update(0f);
-        }
-
-        // If your equipment system attaches meshes under bones, call your existing
-        // builder/apply method here using the same item definitions:
-        // previewEquipment.ApplyFrom(liveEquipment);
-    }
-
+    /// <summary>Ensures the whole clone is on the preview layer.</summary>
     private void SetLayerRecursively(GameObject go, int layer)
     {
         go.layer = layer;
-        foreach (Transform t in go.transform) SetLayerRecursively(t.gameObject, layer);
+        foreach (Transform t in go.transform)
+            SetLayerRecursively(t.gameObject, layer);
     }
 
+    /// <summary>Removes gameplay MonoBehaviours; keeps visuals/animators.</summary>
     private void StripRuntimeScripts(GameObject go)
     {
-        // Remove gameplay-only scripts (movement, input, health, etc.)
-        var all = go.GetComponentsInChildren<MonoBehaviour>(true);
-        foreach (var mb in all)
-        {
-            // Keep Animator and any render helpers; remove everything else
-            if (mb is Animator) continue;
+        var behaviours = go.GetComponentsInChildren<MonoBehaviour>(true);
+        foreach (var mb in behaviours)
             Destroy(mb);
+        // Animators are not MonoBehaviours, so they remain.
+    }
+
+    /// <summary>
+    /// Centers model: x/z centered, feet at y=0. Also returns local bounds (after centering).
+    /// </summary>
+    private void CenterCloneOnBounds(Transform t, out Bounds localBounds)
+    {
+        var rends = t.GetComponentsInChildren<Renderer>(true);
+        localBounds = new Bounds(Vector3.zero, Vector3.zero);
+        if (rends.Length == 0) return;
+
+        // 1) Build combined WORLD bounds
+        Bounds worldB = rends[0].bounds;
+        for (int i = 1; i < rends.Length; i++) worldB.Encapsulate(rends[i].bounds);
+
+        // 2) Convert the world center & a point at minY (same X/Z as center) to LOCAL
+        Vector3 worldCenter = worldB.center;
+        Vector3 worldMinPoint = new Vector3(worldCenter.x, worldB.min.y, worldCenter.z);
+
+        Vector3 centerLocal = t.InverseTransformPoint(worldCenter);
+        float minYLocal = t.InverseTransformPoint(worldMinPoint).y;
+
+        // 3) Shift so X/Z are centered and feet rest on y=0
+        Vector3 shift = new Vector3(centerLocal.x, minYLocal, centerLocal.z);
+        t.localPosition -= shift;
+
+        // 4) Recompute local bounds after the shift (more stable framing)
+        //    We rebuild by transforming each renderer’s world bounds corners to local.
+        bool first = true;
+        foreach (var r in rends)
+        {
+            // approximate by using world bounds extents converted to a local AABB
+            var wb = r.bounds;
+            // sample 8 corners
+            Vector3[] corners = new Vector3[8];
+            Vector3 min = wb.min; Vector3 max = wb.max;
+            int k = 0;
+            for (int ix = 0; ix <= 1; ix++)
+                for (int iy = 0; iy <= 1; iy++)
+                    for (int iz = 0; iz <= 1; iz++)
+                    {
+                        corners[k++] = new Vector3(ix == 0 ? min.x : max.x, iy == 0 ? min.y : max.y, iz == 0 ? min.z : max.z);
+                    }
+            // accumulate in local space
+            foreach (var c in corners)
+            {
+                Vector3 cl = t.InverseTransformPoint(c);
+                if (first) { localBounds = new Bounds(cl, Vector3.zero); first = false; }
+                else localBounds.Encapsulate(cl);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Push/pull camera so the model fits vertically with a small padding.
+    /// Works with perspective cameras.
+    /// </summary>
+    private void AutoFrame()
+    {
+        if (!_cam || _modelBoundsLocal.size.sqrMagnitude < 1e-6f) return;
+
+        // Bigger 'zoom' => smaller required height => camera moves closer
+        float needHeight = (_modelBoundsLocal.size.y / Mathf.Max(zoom, 0.01f)) * (1f + framePadding * 2f);
+
+        float vfov = _cam.fieldOfView * Mathf.Deg2Rad;
+        float fitDist = (needHeight * 0.5f) / Mathf.Tan(vfov * 0.5f);
+
+        distance = Mathf.Max(distance, fitDist);
+        PositionCamera();
+    }
+
+
+    private void OnDestroy()
+    {
+        if (_rt != null)
+        {
+            if (_cam) _cam.targetTexture = null;
+            _rt.Release();
+            Destroy(_rt);
         }
     }
 }

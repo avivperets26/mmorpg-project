@@ -1,6 +1,8 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using System.Collections;
+using UnityEngine.EventSystems;
+
 
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
@@ -43,6 +45,10 @@ public class PlayerController : MonoBehaviour
     // For directional dodge
     private Vector3 lastDesiredDir = Vector3.zero;
 
+    // === Deferred click-to-move handling ===
+    private bool pendingMoveClick;
+    private InputAction.CallbackContext pendingClickCtx;
+
     void Awake()
     {
         animator = GetComponentInChildren<Animator>();
@@ -56,6 +62,20 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
+        if (pendingMoveClick)
+        {
+            pendingMoveClick = false;
+
+            if (!IsPointerOverUI())
+            {
+                if (TryGetMouseGroundPoint(out var p))
+                {
+                    clickTargetWorld = p;
+                    hasClickTarget = true;
+                }
+            }
+            // else: click was on UI, ignore
+        }
         ApplyGravity();
 
         if (isDodging)
@@ -196,22 +216,32 @@ public class PlayerController : MonoBehaviour
         if (ctx.performed || ctx.started)
             mouseScreenPos = ctx.ReadValue<Vector2>();
     }
+    private bool IsPointerOverUI()
+    {
+        if (EventSystem.current == null) return false;
+        if (EventSystem.current.IsPointerOverGameObject()) return true;
+        for (int i = 0; i < Input.touchCount; i++)
+            if (EventSystem.current.IsPointerOverGameObject(Input.GetTouch(i).fingerId))
+                return true;
+        return false;
+    }
 
+    // Right-click (or your chosen button) to set a move target once
+    // (Action: MoveClick, Button -> Mouse/rightButton)
     // Right-click (or your chosen button) to set a move target once
     // (Action: MoveClick, Button -> Mouse/rightButton)
     public void OnMoveClick(InputAction.CallbackContext ctx)
     {
-        if (ctx.performed) // fire once when pressed
+        if (ctx.performed)
         {
-            if (TryGetMouseGroundPoint(out var p))
-            {
-                clickTargetWorld = p;
-                hasClickTarget = true;
-            }
+            // Defer handling to next Update so EventSystem UI state is valid
+            pendingMoveClick = true;
+            pendingClickCtx = ctx;
         }
-        // Releasing the button does not cancel movement; player will walk to target.
-        // If you want to cancel on release: if (ctx.canceled) hasClickTarget = false;
     }
+
+
+
 
     // Directional dodge in lastDesiredDir (or forward if none)
     public void OnDodge(InputAction.CallbackContext ctx)
