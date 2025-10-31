@@ -1,4 +1,3 @@
-// Assets/Scripts/Inventory/ItemPreviewRenderer.cs
 using System.Collections.Generic;
 using UnityEngine;
 

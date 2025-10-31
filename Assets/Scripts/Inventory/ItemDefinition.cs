@@ -1,7 +1,9 @@
 // Assets/Scripts/Inventory/ItemDefinition.cs
 using UnityEngine;
 
-public enum ItemRarity { Common, Rare, Legendary }
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 /// <summary>
 /// Per-item tuning used ONLY for the inventory/UI 3D preview.
@@ -54,13 +56,13 @@ public class ItemDefinition : ScriptableObject
     public ItemPreviewOptions preview = new ItemPreviewOptions();
 
     [Header("Meta")]
-    public ItemRarity rarity = ItemRarity.Common;
+    public Game.Items.ItemRarity rarity = Game.Items.ItemRarity.Common;
 
-    public static Color RarityColor(ItemRarity r) => r switch
+    public static Color RarityColor(Game.Items.ItemRarity r) => r switch
     {
-        ItemRarity.Common => Color.white,
-        ItemRarity.Rare => new Color(0.45f, 0.70f, 1f),
-        ItemRarity.Legendary => new Color(1f, 0.70f, 0.20f),
+        Game.Items.ItemRarity.Common => Color.white,
+        Game.Items.ItemRarity.Rare => new Color(0.45f, 0.70f, 1f),
+        Game.Items.ItemRarity.Legendary => new Color(1f, 0.70f, 0.20f),
         _ => Color.white
     };
 }

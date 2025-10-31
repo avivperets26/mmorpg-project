@@ -49,8 +49,10 @@ public class ItemPreviewHover : MonoBehaviour, IPointerEnterHandler, IPointerExi
     public void OnPointerExit(PointerEventData eventData)
     {
         _hovering = false;
-        // We don't end live immediately; we animate back to 0 first.
+        // End immediately to avoid overlapping live previews from other slots.
+        EndLiveAndRestore(immediate: true);
     }
+
 
     private void Update()
     {
@@ -63,26 +65,16 @@ public class ItemPreviewHover : MonoBehaviour, IPointerEnterHandler, IPointerExi
         }
         else
         {
-            // Move back toward 0 smoothly
-            _yAngle = Mathf.MoveTowardsAngle(_yAngle, 0f, returnDegreesPerSecond * Time.deltaTime);
-
-            // If we reached 0, end live and restore static RT
-            if (Mathf.Abs(Mathf.DeltaAngle(_yAngle, 0f)) <= epsilonDegrees)
-            {
-                EndLiveAndRestore();
-                return;
-            }
+            // Not hovering anymore: we now end live immediately in OnPointerExit.
+            return;
         }
 
-        // Apply rotation around Y relative to the base preview rotation
         if (_live.modelRoot != null)
-        {
             _live.modelRoot.rotation = Quaternion.AngleAxis(_yAngle, Vector3.up) * _live.baseWorldRotation;
-        }
 
-        // Re-render the frame into the live RT
         ItemPreviewRenderer.Instance.RenderFrame(_live);
     }
+
 
     private void OnDisable()
     {

@@ -12,7 +12,9 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
     [Min(0.1f)] public float pickupRadius = 2.0f;
 
     [Header("UI (optional)")]
+
     public TextMeshPro label;   // assign if you want the floating label
+
 
     public Transform Transform => transform;
     public float MaxUseDistance => pickupRadius;

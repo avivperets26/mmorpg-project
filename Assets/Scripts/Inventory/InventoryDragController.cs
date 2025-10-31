@@ -1,4 +1,3 @@
-// Assets/Scripts/Inventory/InventoryDragController.cs
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
@@ -94,9 +93,8 @@ public class InventoryDragController : MonoBehaviour
 
         // Update footprint overlay
         var fit = PreviewFootprintAt(cellX, cellY, _pickedItem);
-        _footprintImg.color = fit ? fitColor : badColor;
+        _footprintImg.enabled = false;   // ⬅️ keep it invisible
 
-        // Dim the grid cells underneath to visualize occupied area
         inventoryUI.ClearHighlights();
         Color dim = fit ? new Color(0f, 0f, 0f, 0.5f) : new Color(0.5f, 0f, 0f, 0.5f);
         inventoryUI.HighlightCells(cellX, cellY, _pickedItem.Width, _pickedItem.Height, dim);
@@ -121,10 +119,34 @@ public class InventoryDragController : MonoBehaviour
             // Keep it simple for now.
         }
     }
+    private void OnDisable()
+    {
+        // If the panel disables while dragging, clean up everything.
+        if (_dragging)
+        {
+            // restore the item to its original place so inventory stays consistent
+            CancelDrag();
+            return;
+        }
+
+        // Even if not dragging, ensure no orphan footprint remains
+        if (_footprintRect) Destroy(_footprintRect.gameObject);
+        _footprintRect = null;
+        _footprintImg = null;
+
+        if (_ghostRect) Destroy(_ghostRect.gameObject);
+        _ghostRect = null;
+        _ghostRaw = null;
+    }
+
 
     private void BeginDrag(InventoryItemView view)
     {
         if (view == null || view.item == null) return;
+        // Safety: clear any stale visuals
+        if (_footprintRect) { Destroy(_footprintRect.gameObject); _footprintRect = null; _footprintImg = null; }
+        if (_ghostRect) { Destroy(_ghostRect.gameObject); _ghostRect = null; _ghostRaw = null; }
+
         _pickedView = view;
         _pickedItem = view.item;
         inventoryUI.dragHiddenItem = _pickedItem;
@@ -143,6 +165,8 @@ public class InventoryDragController : MonoBehaviour
         // Build footprint overlay under gridRoot
         _footprintRect = CreateFootprint();
         _footprintImg = _footprintRect.GetComponent<Image>();
+        _footprintImg.enabled = false;   // ensure it stays invisible
+
 
         _dragging = true;
 
@@ -227,17 +251,25 @@ public class InventoryDragController : MonoBehaviour
         var rt = go.GetComponent<RectTransform>();
         go.transform.SetParent(gridRoot, false);
 
+        var le = go.AddComponent<LayoutElement>(); // keep it out of GridLayoutGroup
+        le.ignoreLayout = true;
+
         rt.anchorMin = Vector2.up;   // top-left (0,1)
         rt.anchorMax = Vector2.up;
         rt.pivot = new Vector2(0f, 1f);
 
         var img = go.GetComponent<Image>();
         img.type = Image.Type.Sliced;
-        img.sprite = footprintSprite; // optional
-        img.color = fitColor;
+        img.sprite = footprintSprite;
+        img.raycastTarget = false;
+
+        img.enabled = false;   // ⬅️ never render the footprint
+        go.SetActive(false);   // hidden until first position (still fine to keep hidden)
 
         return rt;
     }
+
+
 
     private bool PreviewFootprintAt(int cellX, int cellY, InventoryItem it)
     {
@@ -258,6 +290,10 @@ public class InventoryDragController : MonoBehaviour
         // Position & size footprint rect (anchored to grid top-left)
         _footprintRect.anchoredPosition = new Vector2(px, -py);
         _footprintRect.sizeDelta = new Vector2(wPx, hPx);
+
+        // Ensure it only becomes visible once it's validly placed
+        if (!_footprintRect.gameObject.activeSelf)
+            _footprintRect.gameObject.SetActive(true);
 
         // Test validity using InventoryData.CanPlace with the candidate coords
         int prevX = it.x; int prevY = it.y;

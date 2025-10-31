@@ -1,6 +1,7 @@
 using UnityEngine;
 
-[CreateAssetMenu(fileName = "EquipmentItem", menuName = "MMO/Equipment Item")]
+[CreateAssetMenu(fileName = "LegacyEquipmentItem", menuName = "MMO/Legacy/Equipment Item")]
+[System.Obsolete("Use Game.Items.EquipmentItemDefinition instead.")]
 public class EquipmentItem : ScriptableObject
 {
     public string displayName = "Boots";
