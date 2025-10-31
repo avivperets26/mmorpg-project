@@ -271,7 +271,6 @@ public class InventoryUI : MonoBehaviour
             if (def.preview != null) contRect.anchoredPosition += def.preview.uiOffsetPx;
 
             contRect.localRotation = Quaternion.identity;
-
             // --- RawImage child filling the container ---
             var imgGO = new GameObject("Image", typeof(RectTransform), typeof(RawImage));
             imgGO.transform.SetParent(container.transform, false);
@@ -287,7 +286,7 @@ public class InventoryUI : MonoBehaviour
 
             ivRaw.texture = rt;
             ivRaw.color = Color.white;
-            ivRaw.raycastTarget = true;
+            ivRaw.raycastTarget = true; // <- we want pointer events on the preview image
 
             // hover + drag hookup (unchanged)
             var hover = imgGO.AddComponent<ItemPreviewHover>();
@@ -297,8 +296,17 @@ public class InventoryUI : MonoBehaviour
             var view = imgGO.AddComponent<InventoryItemView>();
             view.item = it; view.container = contRect; view.raw = ivRaw; view.dragCtrl = dragController; view.previewTexture = rt;
 
+            var tip = imgGO.AddComponent<InventorySlotTooltip>();
+            // Build a runtime instance for the tooltip. If your InventoryItem `it`
+            // carries upgrade/blessed/sockets, copy them here before showing.
+            tip.itemInstance = new Game.Items.ItemInstance(def, def.defaultTier);
+            // (optional) tip.itemInstance.isBlessed = it.isBlessed; tip.itemInstance.upgradeLevel = it.upgrade;
+            // (optional) tip.itemInstance.sockets.AddRange(it.sockets);
+
+            // keep this container above the grid
             contRect.SetAsLastSibling();
             _itemViews.Add(container);
+
 
 
             // Optional: dim covered cells

@@ -1,6 +1,7 @@
 // Assets/Scripts/Items/ItemWorldPickup.cs
 using UnityEngine;
 using TMPro;
+using Game.Items; // <-- add this
 
 [RequireComponent(typeof(Collider))]
 public class ItemWorldPickup : MonoBehaviour, IInteractable
@@ -12,9 +13,7 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
     [Min(0.1f)] public float pickupRadius = 2.0f;
 
     [Header("UI (optional)")]
-
     public TextMeshPro label;   // assign if you want the floating label
-
 
     public Transform Transform => transform;
     public float MaxUseDistance => pickupRadius;
@@ -31,7 +30,10 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
         if (def && label)
         {
             label.text = def.displayName;
-            label.color = ItemDefinition.RarityColor(def.rarity);
+            // WAS: ItemDefinition.RarityColor(def.rarity)
+            label.color = RarityRules.GetLabelColor(def.defaultTier);
+            // If you prefer legacy colors, use:
+            // label.color = ItemDefinition.RarityColor(def.legacyRarity);
         }
     }
 

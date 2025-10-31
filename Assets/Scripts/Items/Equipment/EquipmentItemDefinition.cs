@@ -1,3 +1,4 @@
+// Assets/Scripts/Items/Equipment/EquipmentItemDefinition.cs
 using UnityEngine;
 
 namespace Game.Items
@@ -5,9 +6,7 @@ namespace Game.Items
     [CreateAssetMenu(menuName = "MMO/Items/Equipment Item", fileName = "EquipmentItem")]
     public class EquipmentItemDefinition : ItemDefinition
     {
-        [Header("Classification")]
-        public ItemCategory category = ItemCategory.Armor;
-        public ItemSubtype subtype = ItemSubtype.Helmet;
+        [Header("Equipment")]
         public EquipmentSlot slot = EquipmentSlot.Head;
 
         [Header("Stats & Set")]
@@ -23,8 +22,9 @@ namespace Game.Items
 
         private void OnValidate()
         {
+            // 'subtype' is inherited from ItemDefinition
             slot = EquipmentMapping.GetSlotForSubtype(subtype);
-            category = EquipmentMapping.GetCategoryForSubtype(subtype);
+            // 'category' is auto-derived in ItemDefinition.OnValidate()
         }
     }
 }

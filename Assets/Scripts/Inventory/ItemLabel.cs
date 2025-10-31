@@ -1,26 +1,40 @@
+// Assets/Scripts/Inventory/ItemLabel.cs
 using UnityEngine;
 using TMPro;
+using Game.Items;
 
+[RequireComponent(typeof(TMP_Text))]
 public class ItemLabel : MonoBehaviour
 {
-    [SerializeField] TMP_Text text;
-    [SerializeField] ItemDefinition item;
+    [SerializeField] private ItemDefinition def;
+    [SerializeField] private bool useLegacyIfPresent = false;
 
-    void Reset() => text = GetComponentInChildren<TMP_Text>();
+    private TMP_Text _text;
 
-    void OnValidate()
+    void Awake()
     {
-        if (text && item) Apply();
+        _text = GetComponent<TMP_Text>();
+        Refresh();
     }
 
-    void Start()
+    public void SetItem(ItemDefinition definition)
     {
-        if (text && item) Apply();
+        def = definition;
+        Refresh();
     }
 
-    void Apply()
+    public void Refresh()
     {
-        text.text = item.displayName;
-        text.color = ItemDefinition.RarityColor(item.rarity);
+        if (!_text || !def) return;
+
+        // Prefer the new 9-tier system
+        var color = RarityRules.GetLabelColor(def.defaultTier);
+
+        // Optional: if you want old 3-tier coloring sometimes
+        if (useLegacyIfPresent)
+            color = ItemDefinition.RarityColor(def.legacyRarity);
+
+        _text.color = color;
+        _text.text = def.displayName;
     }
 }
