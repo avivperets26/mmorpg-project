@@ -286,26 +286,31 @@ public class InventoryUI : MonoBehaviour
 
             ivRaw.texture = rt;
             ivRaw.color = Color.white;
-            ivRaw.raycastTarget = true; // <- we want pointer events on the preview image
+            ivRaw.raycastTarget = true; // must be true so IPointerEnter/Exit fire
 
-            // hover + drag hookup (unchanged)
+            // hover spin (you already had this)
             var hover = imgGO.AddComponent<ItemPreviewHover>();
             hover.def = def; hover.rtWidth = rtW; hover.rtHeight = rtH; hover.initialStaticTexture = rt;
             hover.spinDegreesPerSecond = 40f; hover.returnDegreesPerSecond = 180f;
 
+            // drag view (you already had this)
             var view = imgGO.AddComponent<InventoryItemView>();
             view.item = it; view.container = contRect; view.raw = ivRaw; view.dragCtrl = dragController; view.previewTexture = rt;
 
-            var tip = imgGO.AddComponent<InventorySlotTooltip>();
-            // Build a runtime instance for the tooltip. If your InventoryItem `it`
-            // carries upgrade/blessed/sockets, copy them here before showing.
-            tip.itemInstance = new Game.Items.ItemInstance(def, def.defaultTier);
-            // (optional) tip.itemInstance.isBlessed = it.isBlessed; tip.itemInstance.upgradeLevel = it.upgrade;
-            // (optional) tip.itemInstance.sockets.AddRange(it.sockets);
+            // 👉 Tooltip hookup (ADD / KEEP this here)
+            var tip = imgGO.GetComponent<InventorySlotTooltip>();
+            if (!tip) tip = imgGO.AddComponent<InventorySlotTooltip>();
 
-            // keep this container above the grid
+            tip.itemInstance = new Game.Items.ItemInstance(def, def.defaultTier);
+
+            // NEW: tell the tooltip to hug the footprint container (pivot 0,1), not the stretched image
+            tip.targetOverride = contRect;
+            // (If you have blessed/upgrade/socket data on 'it', copy it here)
+
+            // keep container on top
             contRect.SetAsLastSibling();
             _itemViews.Add(container);
+
 
 
 

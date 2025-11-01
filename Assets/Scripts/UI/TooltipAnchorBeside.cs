@@ -1,20 +1,35 @@
+// Assets/Scripts/UI/TooltipAnchorBeside.cs
 using UnityEngine;
-using UnityEngine.UI; // for LayoutRebuilder/LayoutUtility
+using UnityEngine.UI;
 
-/// <summary>
-/// Positions a tooltip to the left or right of a target RectTransform,
-/// clamped inside the parent Canvas.
-/// </summary>
+[ExecuteAlways]
 public class TooltipAnchorBeside : MonoBehaviour
 {
-    [Tooltip("Gap from the item and canvas edges (x = horizontal, y = vertical clamp).")]
-    public Vector2 padding = new(12, 12);
+    public enum VAlign { Top, Center, Bottom }
 
+    [Header("Behavior")]
+    [Tooltip("Pixels between the slot edge and the tooltip box.")]
+    public float gapX = 10f;
+
+    [Tooltip("Keep some room from top/bottom canvas edges when clamping.")]
+    public float clampPaddingY = 12f;
+
+    [Tooltip("Vertical alignment relative to the slot.")]
+    public VAlign verticalAlign = VAlign.Center;
+
+    [Tooltip("Optional fine-tune after auto placement (X right, Y up).")]
+    public Vector2 nudge = Vector2.zero;
+
+    [Header("Wiring")]
     [Tooltip("Tooltip RectTransform (self).")]
     public RectTransform rect;
 
     [Tooltip("Canvas containing the tooltip.")]
     public Canvas canvas;
+
+    // runtime
+    RectTransform _canvasRect;
+    RectTransform _target;
 
     void Reset()
     {
@@ -22,59 +37,94 @@ public class TooltipAnchorBeside : MonoBehaviour
         canvas = GetComponentInParent<Canvas>();
     }
 
-    /// <summary>Place tooltip beside the target, picking the side with more space.</summary>
+    void OnEnable()
+    {
+        if (!rect) rect = transform as RectTransform;
+        if (!canvas) canvas = GetComponentInParent<Canvas>();
+        _canvasRect = canvas ? canvas.transform as RectTransform : null;
+
+        // Ensure tooltip lives under this canvas and uses top-left pivot/anchors
+        if (rect && canvas && rect.parent != canvas.transform)
+            rect.SetParent(canvas.transform, worldPositionStays: false);
+
+        if (rect)
+        {
+            rect.anchorMin = new Vector2(0f, 1f);
+            rect.anchorMax = new Vector2(0f, 1f);
+            rect.pivot = new Vector2(0f, 1f);
+        }
+
+        if (_target) RepositionNow();
+    }
+
+    void LateUpdate()
+    {
+        if (_target && rect && canvas) RepositionNow();
+    }
+
+    /// <summary>Attach to a target and start following it.</summary>
+    public void Attach(RectTransform target)
+    {
+        _target = target;
+        RepositionNow();
+    }
+
+    public void Detach() => _target = null;
+
+    /// <summary>Legacy one-shot call.</summary>
     public void PlaceBeside(RectTransform target)
     {
-        if (!canvas || !rect || !target) return;
+        Attach(target);
+        RepositionNow();
+    }
 
-        var canvasRect = canvas.transform as RectTransform;
-        Rect c = canvasRect.rect;
+    /// <summary>Compute and apply anchoredPosition in canvas space.</summary>
+    public void RepositionNow()
+    {
+        if (!_target || !_canvasRect || !rect || !canvas) return;
 
-        // Target world corners -> canvas local
-        Vector3[] w = new Vector3[4];
-        target.GetWorldCorners(w);
-        Vector2 tl = WorldToCanvasLocal(w[1]); // top-left
-        Vector2 br = WorldToCanvasLocal(w[3]); // bottom-right
-        float targetLeft = tl.x;
-        float targetRight = br.x;
-        float targetTop = tl.y;
-        float targetBottom = br.y;
-        float targetMidY = (targetTop + targetBottom) * 0.5f;
-
-        // Rebuild & read tooltip preferred size in canvas space
+        // Make sure layout size is current
         LayoutRebuilder.ForceRebuildLayoutImmediate(rect);
+
+        // Tooltip preferred size in canvas units
         Vector2 tipSize = new(
             LayoutUtility.GetPreferredSize(rect, 0),
             LayoutUtility.GetPreferredSize(rect, 1)
         );
 
-        // Choose side with more room
-        float spaceRight = c.xMax - targetRight;
-        float spaceLeft = targetLeft - c.xMin;
-        bool placeRight = spaceRight >= spaceLeft;
+        // Target bounds relative to the canvas (robust to scaling)
+        var b = RectTransformUtility.CalculateRelativeRectTransformBounds(_canvasRect, _target);
+        float targetLeft = b.min.x;
+        float targetRight = b.max.x;
+        float targetBottom = b.min.y;
+        float targetTop = b.max.y;
+        float targetMidY = 0.5f * (targetTop + targetBottom);
 
-        float x = placeRight
-            ? Mathf.Min(targetRight + padding.x, c.xMax - padding.x - tipSize.x)
-            : Mathf.Max(targetLeft - padding.x - tipSize.x, c.xMin + padding.x);
+        // Canvas rect (also in canvas space)
+        Rect c = _canvasRect.rect;
 
-        // Vertically center to target then clamp to canvas
-        float y = Mathf.Clamp(targetMidY - tipSize.y * 0.5f,
-                              c.yMin + padding.y,
-                              c.yMax - padding.y - tipSize.y);
+        // Prefer RIGHT, flip LEFT if needed
+        bool canRight = targetRight + gapX + tipSize.x <= c.xMax;
+        bool canLeft = targetLeft - gapX - tipSize.x >= c.xMin;
 
-        rect.anchoredPosition = new Vector2(x, y);
-    }
+        float x;
+        if (canRight || !canLeft)
+            x = targetRight + gapX;
+        else
+            x = targetLeft - gapX - tipSize.x;
 
-    Vector2 WorldToCanvasLocal(Vector3 world)
-    {
-        var canvasRect = canvas.transform as RectTransform;
-        RectTransformUtility.ScreenPointToLocalPointInRectangle(
-            canvasRect,
-            RectTransformUtility.WorldToScreenPoint(
-                canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera,
-                world),
-            canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera,
-            out var local);
-        return local;
+        // Vertical alignment
+        float y;
+        switch (verticalAlign)
+        {
+            case VAlign.Top: y = targetTop - tipSize.y; break;
+            case VAlign.Bottom: y = targetBottom; break;
+            default: y = targetMidY - tipSize.y * 0.5f; break;
+        }
+
+        // Clamp to canvas
+        y = Mathf.Clamp(y, c.yMin + clampPaddingY, c.yMax - clampPaddingY - tipSize.y);
+
+        rect.anchoredPosition = new Vector2(x, y) + nudge;
     }
 }

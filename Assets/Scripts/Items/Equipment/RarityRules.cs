@@ -21,17 +21,17 @@ namespace Game.Items
 
         public static Color GetLabelColor(ItemTier tier)
         {
-            // tweak to match your palette
+            // Warm
             return tier switch
             {
-                ItemTier.Common => Color.grey,
-                ItemTier.Magical => new Color(0.35f, 0.55f, 1f),      // Blue
-                ItemTier.Rare => new Color(1f, 0.9f, 0.3f),         // Yellow
-                ItemTier.UltraRare => new Color(1f, 0.55f, 0.15f),       // Orange
-                ItemTier.Epic => new Color(0.7f, 0.35f, 0.9f),      // Purple
-                ItemTier.Legendary => new Color(0.35f, 1f, 0.35f),       // Green
-                ItemTier.Mythical => new Color(0.2f, 0.95f, 0.9f),      // Turquoise
-                ItemTier.Godlike => new Color(1f, 1f, 1f),             // will animate
+                ItemTier.Common => new Color(0.88f, 0.88f, 0.88f),  // light grey/white
+                ItemTier.Magical => new Color(0.45f, 0.65f, 1.00f),  // blue
+                ItemTier.Rare => new Color(1.00f, 0.85f, 0.35f),  // gold-yellow
+                ItemTier.UltraRare => new Color(1.00f, 0.60f, 0.20f),  // orange
+                ItemTier.Epic => new Color(0.70f, 0.40f, 0.95f),  // purple
+                ItemTier.Legendary => new Color(0.35f, 1.00f, 0.45f),  // green (D2-style)
+                ItemTier.Mythical => new Color(0.20f, 0.95f, 0.90f),  // turquoise
+                ItemTier.Godlike => Color.white,                     // (animate/glow later)
                 ItemTier.EventItem => Color.white,
                 _ => Color.white
             };

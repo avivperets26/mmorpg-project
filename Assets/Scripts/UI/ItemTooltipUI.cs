@@ -4,6 +4,10 @@ using UnityEngine;
 using TMPro;
 using Game.Items;
 
+/// <summary>
+/// Builds and displays the item tooltip beside an inventory slot.
+/// Prefers right side of the slot and auto-flips if out of screen bounds.
+/// </summary>
 public class ItemTooltipUI : MonoBehaviour
 {
     [Header("Wiring")]
@@ -18,18 +22,60 @@ public class ItemTooltipUI : MonoBehaviour
     [SerializeField] private Color blessedColor = new(1f, 0.9f, 0.3f); // warm gold
     [SerializeField] private Color labelGrey = new(0.75f, 0.75f, 0.75f);
 
-    // --- Call this from slots with the target RectTransform ---
-    public void Show(ItemInstance inst, RectTransform target)
+    private void Awake()
     {
-        Show(inst); // build + activate
-        if (anchor && target) anchor.PlaceBeside(target);
+        gameObject.SetActive(false);
     }
 
-    public void Show(ItemInstance inst)
+    private void OnDisable()
+    {
+        // stop following when hidden
+        anchor?.Detach();
+    }
+
+    // ----------------------------------------------------------------------
+
+    /// <summary>
+    /// Show tooltip for given item beside the given target RectTransform.
+    /// </summary>
+    public void Show(ItemInstance inst, RectTransform target)
+    {
+        if (inst == null || inst.def == null) return;
+
+        // 1) Build content (does not activate yet)
+        Build(inst);
+
+        // 2) Position beside target (prefer right side)
+        if (anchor && target)
+        {
+            anchor.Attach(target);
+            anchor.RepositionNow();
+        }
+
+        // 3) Now show (after positioned)
+        gameObject.SetActive(true);
+    }
+
+    /// <summary>
+    /// Hide tooltip and detach anchor.
+    /// </summary>
+    public void Hide()
+    {
+        anchor?.Detach();
+        gameObject.SetActive(false);
+    }
+
+    // ----------------------------------------------------------------------
+
+    /// <summary>
+    /// Builds tooltip UI content for given item.
+    /// </summary>
+    private void Build(ItemInstance inst)
     {
         var def = inst.def;
         var labelColor = RarityRules.GetLabelColor(inst.tier);
 
+        // Title + rarity
         title.text = def.displayName;
         title.color = labelColor;
 
@@ -40,10 +86,12 @@ public class ItemTooltipUI : MonoBehaviour
             subtitleRarity.color = labelColor;
         }
 
-        // clear previous lines
-        foreach (Transform t in lineContainer) Destroy(t.gameObject);
+        // Clear previous lines
+        for (int i = lineContainer.childCount - 1; i >= 0; i--)
+            Destroy(lineContainer.GetChild(i).gameObject);
 
-        // Construct sections
+        // ------------------- Content Sections -------------------
+
         AddHeader("Level / Class");
         AddLine($"Level {def.requirements.level}");
         AddLine($"Class: {ClassesToText(def.requirements.usableBy)}");
@@ -68,6 +116,7 @@ public class ItemTooltipUI : MonoBehaviour
             AddLine($"Critical: {inst.EffectiveCritChance * 100f:0.#}% ×{inst.EffectiveCritMult:0.##}");
         }
 
+        // Armor & Shield
         if (def.category == ItemCategory.Armor || def.subtype == ItemSubtype.Shield)
         {
             AddHeader("Defense");
@@ -116,37 +165,47 @@ public class ItemTooltipUI : MonoBehaviour
                 description.text = def.description;
                 description.color = labelGrey;
             }
-            else description.gameObject.SetActive(false);
+            else
+            {
+                description.gameObject.SetActive(false);
+            }
         }
-
-        gameObject.SetActive(true);
     }
 
-    public void Hide() => gameObject.SetActive(false);
+    // ----------------------------------------------------------------------
 
-    TMP_Text AddHeader(string text)
+    private TMP_Text AddHeader(string text)
     {
         var go = Instantiate(linePrefab, lineContainer);
         var tmp = go.GetComponent<TMP_Text>();
         tmp.text = $"<b>{text}</b>";
+        tmp.color = new Color(0.95f, 0.9f, 0.75f); // warm light
         return tmp;
     }
 
-    TMP_Text AddLine(string text)
+    private TMP_Text AddLine(string text)
     {
         var go = Instantiate(linePrefab, lineContainer);
         var tmp = go.GetComponent<TMP_Text>();
         tmp.text = text;
+        tmp.color = new Color(0.92f, 0.92f, 0.92f);
         return tmp;
     }
 
-    static string ClassesToText(CharacterClass flags)
+    private static string ClassesToText(CharacterClass flags)
     {
         if (flags == CharacterClass.All) return "All";
         if (flags == CharacterClass.None) return "-";
+
         StringBuilder sb = new();
         foreach (CharacterClass c in new[] { CharacterClass.Knight, CharacterClass.Elf, CharacterClass.Wizard })
-            if ((flags & c) != 0) { if (sb.Length > 0) sb.Append(", "); sb.Append(c); }
+        {
+            if ((flags & c) != 0)
+            {
+                if (sb.Length > 0) sb.Append(", ");
+                sb.Append(c);
+            }
+        }
         return sb.ToString();
     }
 }

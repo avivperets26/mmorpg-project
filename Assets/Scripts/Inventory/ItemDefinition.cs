@@ -132,7 +132,7 @@ public class ItemDefinition : ScriptableObject
     /// <summary>
     /// Color used for labels/tooltips based on current tier.
     /// </summary>
-    public Color TierLabelColor => RarityTierBridge.TierColor(defaultTier);
+    public Color TierLabelColor => RarityRules.GetLabelColor(defaultTier);
 
     /// <summary>
     /// Backward-compat color if some UI still reads legacy rarity.
