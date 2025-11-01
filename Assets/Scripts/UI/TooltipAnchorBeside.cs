@@ -1,4 +1,3 @@
-// Assets/Scripts/UI/TooltipAnchorBeside.cs
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -8,26 +7,15 @@ public class TooltipAnchorBeside : MonoBehaviour
     public enum VAlign { Top, Center, Bottom }
 
     [Header("Behavior")]
-    [Tooltip("Pixels between the slot edge and the tooltip box.")]
     public float gapX = 10f;
-
-    [Tooltip("Keep some room from top/bottom canvas edges when clamping.")]
     public float clampPaddingY = 12f;
-
-    [Tooltip("Vertical alignment relative to the slot.")]
     public VAlign verticalAlign = VAlign.Center;
-
-    [Tooltip("Optional fine-tune after auto placement (X right, Y up).")]
     public Vector2 nudge = Vector2.zero;
 
     [Header("Wiring")]
-    [Tooltip("Tooltip RectTransform (self).")]
     public RectTransform rect;
-
-    [Tooltip("Canvas containing the tooltip.")]
     public Canvas canvas;
 
-    // runtime
     RectTransform _canvasRect;
     RectTransform _target;
 
@@ -43,17 +31,11 @@ public class TooltipAnchorBeside : MonoBehaviour
         if (!canvas) canvas = GetComponentInParent<Canvas>();
         _canvasRect = canvas ? canvas.transform as RectTransform : null;
 
-        // Ensure tooltip lives under this canvas and uses top-left pivot/anchors
+        // Ensure tooltip lives under this canvas and uses TL anchors/pivot
         if (rect && canvas && rect.parent != canvas.transform)
             rect.SetParent(canvas.transform, worldPositionStays: false);
 
-        if (rect)
-        {
-            rect.anchorMin = new Vector2(0f, 1f);
-            rect.anchorMax = new Vector2(0f, 1f);
-            rect.pivot = new Vector2(0f, 1f);
-        }
-
+        if (rect) { rect.anchorMin = new Vector2(0, 1); rect.anchorMax = new Vector2(0, 1); rect.pivot = new Vector2(0, 1); }
         if (_target) RepositionNow();
     }
 
@@ -62,67 +44,54 @@ public class TooltipAnchorBeside : MonoBehaviour
         if (_target && rect && canvas) RepositionNow();
     }
 
-    /// <summary>Attach to a target and start following it.</summary>
     public void Attach(RectTransform target)
     {
         _target = target;
         RepositionNow();
     }
-
     public void Detach() => _target = null;
+    public void PlaceBeside(RectTransform target) { Attach(target); RepositionNow(); }
 
-    /// <summary>Legacy one-shot call.</summary>
-    public void PlaceBeside(RectTransform target)
-    {
-        Attach(target);
-        RepositionNow();
-    }
-
-    /// <summary>Compute and apply anchoredPosition in canvas space.</summary>
     public void RepositionNow()
     {
         if (!_target || !_canvasRect || !rect || !canvas) return;
 
-        // Make sure layout size is current
+        // Guard: if target is not under this canvas, positions will be wrong
+        if (!_target.IsChildOf(_canvasRect))
+        {
+            Debug.LogWarning("[TooltipAnchorBeside] Target is not a child of the assigned Canvas. " +
+                             "Move tooltip into the same canvas (InventoryCanvas) or set the Canvas field correctly.");
+        }
+
         LayoutRebuilder.ForceRebuildLayoutImmediate(rect);
 
-        // Tooltip preferred size in canvas units
         Vector2 tipSize = new(
             LayoutUtility.GetPreferredSize(rect, 0),
             LayoutUtility.GetPreferredSize(rect, 1)
         );
 
-        // Target bounds relative to the canvas (robust to scaling)
+        // Bounds of target in canvas space (robust to scaling)
         var b = RectTransformUtility.CalculateRelativeRectTransformBounds(_canvasRect, _target);
-        float targetLeft = b.min.x;
-        float targetRight = b.max.x;
-        float targetBottom = b.min.y;
-        float targetTop = b.max.y;
-        float targetMidY = 0.5f * (targetTop + targetBottom);
+        float left = b.min.x;
+        float right = b.max.x;
+        float bottom = b.min.y;
+        float top = b.max.y;
+        float midY = 0.5f * (top + bottom);
 
-        // Canvas rect (also in canvas space)
         Rect c = _canvasRect.rect;
 
-        // Prefer RIGHT, flip LEFT if needed
-        bool canRight = targetRight + gapX + tipSize.x <= c.xMax;
-        bool canLeft = targetLeft - gapX - tipSize.x >= c.xMin;
+        // Prefer right, flip if needed
+        bool canRight = right + gapX + tipSize.x <= c.xMax;
+        bool canLeft = left - gapX - tipSize.x >= c.xMin;
+        float x = (canRight || !canLeft) ? right + gapX : left - gapX - tipSize.x;
 
-        float x;
-        if (canRight || !canLeft)
-            x = targetRight + gapX;
-        else
-            x = targetLeft - gapX - tipSize.x;
-
-        // Vertical alignment
-        float y;
-        switch (verticalAlign)
+        float y = verticalAlign switch
         {
-            case VAlign.Top: y = targetTop - tipSize.y; break;
-            case VAlign.Bottom: y = targetBottom; break;
-            default: y = targetMidY - tipSize.y * 0.5f; break;
-        }
+            VAlign.Top => top - tipSize.y,
+            VAlign.Bottom => bottom,
+            _ => midY - tipSize.y * 0.5f
+        };
 
-        // Clamp to canvas
         y = Mathf.Clamp(y, c.yMin + clampPaddingY, c.yMax - clampPaddingY - tipSize.y);
 
         rect.anchoredPosition = new Vector2(x, y) + nudge;
