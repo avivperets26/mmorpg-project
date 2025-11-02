@@ -3,71 +3,57 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
-using UnityEngine.InputSystem;
+using UnityEngine.InputSystem; // for Mouse position (safe to keep)
+
+/// <summary>
+/// Pure inventory view/controller:
+/// - Builds the grid once the PlayerInventory.Data exists
+/// - Renders one preview per placed item
+/// - Maintains hover spin, drag view and tooltip hookup
+/// - Replays tooltip hover on open/refresh so it feels seamless
+///
+/// NOTE: Input blocking / action map switching / cursor are owned by UIBlocker
+/// attached on the InventoryPanel root. This class just opens/closes the panel
+/// and handles visuals.
+/// </summary>
 public class InventoryUI : MonoBehaviour
 {
-    [Header("Panel / Input Lock")]
-    [SerializeField] private GameObject inventoryPanel; // drag InventoryPanel root
-    [SerializeField] private PlayerInput playerInput;   // drag the Player's PlayerInput
-    [SerializeField] private Behaviour cinInput;   // <- generic, no Cinemachine namespace
+    [Header("Panel")]
+    [SerializeField] private GameObject inventoryPanel; // InventoryPanel root (with UIBlocker on it)
 
     [Header("Wiring")]
-    [SerializeField] private PlayerInventory inventory;     // drag Player Gameplay Object
-    [SerializeField] private RectTransform gridRoot;        // InventoryPanel/GridRoot (with GridLayoutGroup)
-    [SerializeField] private GameObject slotPrefab;         // Slot prefab (must have RawImage component)
+    [SerializeField] private PlayerInventory inventory;     // Player gameplay object
+    [SerializeField] private RectTransform gridRoot;        // InventoryPanel/GridRoot (GridLayoutGroup)
+    [SerializeField] private GameObject slotPrefab;         // Slot prefab (must have RawImage)
 
     [Header("Preview")]
-    [SerializeField] private Texture2D emptyTexture;        // optional background for empty cells
-    [SerializeField] private int previewSize = 256;         // RT size per item preview (square)
-    [SerializeField] private InventoryDragController dragController; // optional drag controller
-    [HideInInspector] public InventoryItem dragHiddenItem;
+    [SerializeField] private Texture2D emptyTexture;        // Optional bg for empty cells
+    [SerializeField] private int previewSize = 256;         // Base RT size (scaled by item footprint)
+    [SerializeField] private InventoryDragController dragController; // Optional drag controller
+    [HideInInspector] public InventoryItem dragHiddenItem;  // Temporarily hidden while dragging
 
-
+    // grid/cache
     private int _cols, _rows;
     private RawImage[,] _cells;
     private RectTransform[,] _cellRects;
     private GridLayoutGroup _grid;
-
     private bool _built;
-    private bool isOpen;
 
-    // Item views that span multiple cells
+    // active item view containers (overlays)
     private readonly List<GameObject> _itemViews = new();
 
-    private InputAction moveAction, lookAction, dodgeAction, attackAction, moveClickAction, emoteWheelAction; // ← ADD
+    private bool IsOpen => inventoryPanel && inventoryPanel.activeSelf;
 
     private void Awake()
     {
-        // Auto-find PlayerInput if not assigned
-        if (playerInput == null)
-#if UNITY_2023_1_OR_NEWER
-            playerInput = Object.FindFirstObjectByType<PlayerInput>();
-#else
-            playerInput = Object.FindObjectOfType<PlayerInput>();
-#endif
-    }
-
-
-    private void Start()
-    {
-        // cache input actions (your existing code)
-        if (playerInput && playerInput.actions != null)
-        {
-            var a = playerInput.actions;
-            moveAction = a.FindAction("Move");
-            lookAction = a.FindAction("Look");
-            dodgeAction = a.FindAction("Dodge");
-            attackAction = a.FindAction("PrimaryAttack");
-            moveClickAction = a.FindAction("MoveClick");
-            emoteWheelAction = a.FindAction("EmoteWheel");
-        }
-
-        // ⬇️ this line is required to build the cell grid & hook events
-        StartCoroutine(InitWhenReady());
-
         if (!dragController) dragController = GetComponent<InventoryDragController>();
     }
 
+    private void Start()
+    {
+        // Build grid once inventory + data are ready
+        StartCoroutine(InitWhenReady());
+    }
 
     private System.Collections.IEnumerator InitWhenReady()
     {
@@ -90,77 +76,41 @@ public class InventoryUI : MonoBehaviour
         BuildGrid();
         _built = true;
 
-        // now safe to subscribe & draw
+        // subscribe & draw
         inventory.Changed += Refresh;
         Refresh();
     }
 
-    public void Toggle() { if (isOpen) Close(); else Open(); }
-
+    // ------- Public API (open/close handled visually; UIBlocker does the rest) -------
+    public void Toggle()
+    {
+        if (IsOpen) Close();
+        else Open();
+    }
 
     public void Open()
     {
-        if (isOpen) return;
-        isOpen = true;
-
-        // Block gameplay interactions globally
-        UiInputGuard.Push(this);
-
+        if (IsOpen) return;
         if (inventoryPanel) inventoryPanel.SetActive(true);
-        Cursor.visible = true;
-        Cursor.lockState = CursorLockMode.None;
 
-        // Switch input map
-        if (playerInput && playerInput.actions.FindActionMap("UI") != null)
-            playerInput.SwitchCurrentActionMap("UI");
-
-        // Disable gameplay inputs
-        moveAction?.Disable();
-        lookAction?.Disable();
-        dodgeAction?.Disable();
-        attackAction?.Disable();
-        moveClickAction?.Disable();
-        emoteWheelAction?.Disable();
-
-        if (cinInput) cinInput.enabled = false;
-
+        // Tooltip replay only (UIBlocker handles guard/input/cursor)
         UiCoroutineRunner.Run(OpenAfterDelay());
-    }
-
-    private System.Collections.IEnumerator OpenAfterDelay()
-    {
-        // Wait one frame for panel to become active
-        yield return null;
-
-        // Wait one more end-of-frame for all layout & TMP updates
-        yield return new WaitForEndOfFrame();
-
-        // Now replay the pointer enter safely
-        yield return ReplayPointerEnterUnderCursor();
     }
 
     public void Close()
     {
-        if (!isOpen) return;
-        isOpen = false;
-
-        // Unblock gameplay interactions
-        UiInputGuard.Pop(this);
-
+        if (!IsOpen) return;
         if (inventoryPanel) inventoryPanel.SetActive(false);
+    }
 
-        if (playerInput && playerInput.actions.FindActionMap("Gameplay") != null)
-            playerInput.SwitchCurrentActionMap("Gameplay");
+    private System.Collections.IEnumerator OpenAfterDelay()
+    {
+        // 1 frame for SetActive, then end-of-frame for layout/TMP
+        yield return null;
+        yield return new WaitForEndOfFrame();
 
-        // Re-enable actions
-        moveAction?.Enable();
-        lookAction?.Enable();
-        dodgeAction?.Enable();
-        attackAction?.Enable();
-        moveClickAction?.Enable();
-        emoteWheelAction?.Enable();
-
-        if (cinInput) cinInput.enabled = true;
+        // Now safely replay pointer enter for tooltip under cursor
+        yield return ReplayPointerEnterUnderCursor();
     }
 
     private void OnEnable()
@@ -170,12 +120,11 @@ public class InventoryUI : MonoBehaviour
 
     private void OnDisable()
     {
-        if (isOpen) UiInputGuard.Pop(this);
         if (inventory != null) inventory.Changed -= Refresh;
         ClearItemViews();
     }
 
-
+    // ------- Grid build / refresh -------
     private void BuildGrid()
     {
         // Clear previous slots
@@ -206,6 +155,7 @@ public class InventoryUI : MonoBehaviour
                     raw.texture = null;
                     raw.color = new Color(1f, 1f, 1f, 0f);
                 }
+                // Cells themselves are not interactive; item overlays are.
                 raw.raycastTarget = false;
 
                 _cells[x, y] = raw;
@@ -223,6 +173,7 @@ public class InventoryUI : MonoBehaviour
 
         // 2) Reset all cells
         for (int y = 0; y < _rows; y++)
+        {
             for (int x = 0; x < _cols; x++)
             {
                 var raw = _cells[x, y];
@@ -238,8 +189,8 @@ public class InventoryUI : MonoBehaviour
                 }
                 raw.uvRect = new Rect(0, 0, 1, 1);
             }
+        }
 
-        // 3) One preview per placed item
         // 3) One preview per placed item
         foreach (var it in inventory.Items)
         {
@@ -247,7 +198,6 @@ public class InventoryUI : MonoBehaviour
             if (!def) continue;
             if (dragHiddenItem == it) continue;
 
-            // --- Footprint in cells ---
             int w = Mathf.Max(1, it.Width);
             int h = Mathf.Max(1, it.Height);
 
@@ -277,7 +227,7 @@ public class InventoryUI : MonoBehaviour
             container.transform.SetParent(gridRoot, false);
 
             // ignore layout
-            var contLayout = container.AddComponent<UnityEngine.UI.LayoutElement>();
+            var contLayout = container.AddComponent<LayoutElement>();
             contLayout.ignoreLayout = true;
 
             // anchor to grid top-left so math matches footprint preview
@@ -291,10 +241,11 @@ public class InventoryUI : MonoBehaviour
             // place container so its center is at the footprint center
             contRect.anchoredPosition = new Vector2(px + spanW * 0.5f, -(py + spanH * 0.5f));
 
-            // optional 2D nudge
+            // optional 2D nudge from def.preview
             if (def.preview != null) contRect.anchoredPosition += def.preview.uiOffsetPx;
 
             contRect.localRotation = Quaternion.identity;
+
             // --- RawImage child filling the container ---
             var imgGO = new GameObject("Image", typeof(RectTransform), typeof(RawImage));
             imgGO.transform.SetParent(container.transform, false);
@@ -310,32 +261,36 @@ public class InventoryUI : MonoBehaviour
 
             ivRaw.texture = rt;
             ivRaw.color = Color.white;
-            ivRaw.raycastTarget = true; // must be true so IPointerEnter/Exit fire
+            ivRaw.raycastTarget = true; // need IPointerEnter/Exit
 
-            // hover spin (you already had this)
+            // Hover spin
             var hover = imgGO.AddComponent<ItemPreviewHover>();
-            hover.def = def; hover.rtWidth = rtW; hover.rtHeight = rtH; hover.initialStaticTexture = rt;
-            hover.spinDegreesPerSecond = 40f; hover.returnDegreesPerSecond = 180f;
+            hover.def = def;
+            hover.rtWidth = rtW;
+            hover.rtHeight = rtH;
+            hover.initialStaticTexture = rt;
+            hover.spinDegreesPerSecond = 40f;
+            hover.returnDegreesPerSecond = 180f;
 
-            // drag view (you already had this)
+            // Drag view
             var view = imgGO.AddComponent<InventoryItemView>();
-            view.item = it; view.container = contRect; view.raw = ivRaw; view.dragCtrl = dragController; view.previewTexture = rt;
+            view.item = it;
+            view.container = contRect;
+            view.raw = ivRaw;
+            view.dragCtrl = dragController;
+            view.previewTexture = rt;
 
-            // 👉 Tooltip hookup (ADD / KEEP this here)
+            // Tooltip hookup
             var tip = imgGO.GetComponent<InventorySlotTooltip>();
             if (!tip) tip = imgGO.AddComponent<InventorySlotTooltip>();
-
             tip.itemInstance = new Game.Items.ItemInstance(def, def.defaultTier);
-
-            // NEW: tell the tooltip to hug the footprint container (pivot 0,1), not the stretched image
-            tip.targetOverride = contRect;
-            // (If you have blessed/upgrade/socket data on 'it', copy it here)
+            tip.targetOverride = contRect; // tooltip hugs the footprint container
 
             // keep container on top
             contRect.SetAsLastSibling();
             _itemViews.Add(container);
 
-            // Optional: dim covered cells
+            // Optional: dim covered cells (visual polish)
             for (int dy = 0; dy < h; dy++)
                 for (int dx = 0; dx < w; dx++)
                 {
@@ -345,36 +300,30 @@ public class InventoryUI : MonoBehaviour
                 }
         }
 
-        if (isOpen && EventSystem.current != null)
+        if (IsOpen && EventSystem.current != null)
         {
             StartCoroutine(TriggerTooltipUnderCursorNextFrame());
         }
     }
 
-    private void OnDestroy()
-    {
-        if (isOpen) UiInputGuard.Pop(this);
-    }
-
-
+    // --- Tooltip replay helpers ---
     private System.Collections.IEnumerator TriggerTooltipUnderCursorNextFrame()
     {
-        // Let layout settle this frame.
         yield return null;
 
         var es = EventSystem.current;
         var ped = new PointerEventData(es)
         {
 #if ENABLE_INPUT_SYSTEM
-        position = UnityEngine.InputSystem.Mouse.current != null
-            ? UnityEngine.InputSystem.Mouse.current.position.ReadValue()
-            : (Vector2)Input.mousePosition
+            position = UnityEngine.InputSystem.Mouse.current != null
+                ? UnityEngine.InputSystem.Mouse.current.position.ReadValue()
+                : (Vector2)Input.mousePosition
 #else
             position = (Vector2)Input.mousePosition
 #endif
         };
 
-        var results = new System.Collections.Generic.List<RaycastResult>();
+        var results = new List<RaycastResult>();
         es.RaycastAll(ped, results);
 
         for (int i = 0; i < results.Count; i++)
@@ -389,42 +338,35 @@ public class InventoryUI : MonoBehaviour
         }
     }
 
-    // Replay pointer-enter events to restore tooltips after UI changes 
     private System.Collections.IEnumerator ReplayPointerEnterUnderCursor()
     {
-        // Let the panel open, Refresh() build views, and layouts settle (TMP/layout ready).
-        yield return null;                       // 1 frame
-        yield return new WaitForEndOfFrame();    // after layout/TMP
+        yield return null;                    // 1 frame after open
+        yield return new WaitForEndOfFrame(); // after layout/TMP
 
         var es = EventSystem.current;
         if (es == null) yield break;
 
-        // Mouse position (prefers New Input System if available)
         Vector2 pos;
 #if ENABLE_INPUT_SYSTEM
-    pos = UnityEngine.InputSystem.Mouse.current != null
-        ? UnityEngine.InputSystem.Mouse.current.position.ReadValue()
-        : (Vector2)Input.mousePosition;
+        pos = UnityEngine.InputSystem.Mouse.current != null
+            ? UnityEngine.InputSystem.Mouse.current.position.ReadValue()
+            : (Vector2)Input.mousePosition;
 #else
         pos = (Vector2)Input.mousePosition;
 #endif
 
         var eventData = new PointerEventData(es) { position = pos };
 
-        // Raycast UI under cursor
-        var results = new System.Collections.Generic.List<RaycastResult>();
+        var results = new List<RaycastResult>();
         es.RaycastAll(eventData, results);
         if (results.Count == 0) yield break;
 
-        // Some UI logic listens for pointerMove to consider "hovering"
         for (int i = 0; i < results.Count; i++)
             ExecuteEvents.Execute(results[i].gameObject, eventData, ExecuteEvents.pointerMoveHandler);
 
-        // Send pointer-enter to everything hit (harmless; idempotent per element)
         for (int i = 0; i < results.Count; i++)
             ExecuteEvents.Execute(results[i].gameObject, eventData, ExecuteEvents.pointerEnterHandler);
 
-        // Robust fallback: find the first element (or parent) with InventorySlotTooltip
         InventorySlotTooltip foundTip = null;
         for (int i = 0; i < results.Count && foundTip == null; i++)
         {
@@ -432,16 +374,10 @@ public class InventoryUI : MonoBehaviour
             foundTip = go.GetComponent<InventorySlotTooltip>() ?? go.GetComponentInParent<InventorySlotTooltip>();
         }
 
-        // If we found a tooltip target, explicitly invoke its enter handler
-        if (foundTip != null)
-        {
-            foundTip.OnPointerEnter(eventData);
-        }
+        if (foundTip != null) foundTip.OnPointerEnter(eventData);
     }
 
-
-
-    // --- Cell highlighting (used during drag preview) ---
+    // --- Cell highlight API (used by drag) ---
     public void HighlightCells(int x, int y, int w, int h, Color color)
     {
         if (_cells == null) return;
@@ -473,7 +409,6 @@ public class InventoryUI : MonoBehaviour
                 }
             }
     }
-
 
     private void ClearItemViews()
     {

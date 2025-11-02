@@ -1,3 +1,4 @@
+// Assets/Scripts/Interaction/PlayerInteractor.cs
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.EventSystems;
@@ -6,12 +7,12 @@ using UnityEngine.EventSystems;
 public class PlayerInteractor : MonoBehaviour
 {
     [Header("Raycast")]
-    public Camera mainCamera;                 // assign your gameplay camera
-    public LayerMask interactMask = ~0;       // or a dedicated "Interactable" layer
+    public Camera mainCamera;                 // Assign your gameplay camera
+    public LayerMask interactMask = ~0;       // Or a dedicated "Interactable" layer
     public float rayMaxDistance = 100f;
 
     [Header("Use Distance Check")]
-    public bool requireInRange = true;        // if true, also checks IInteractable.MaxUseDistance
+    public bool requireInRange = true;        // If true, also checks IInteractable.MaxUseDistance
 
     private CharacterController cc;
 
@@ -23,30 +24,15 @@ public class PlayerInteractor : MonoBehaviour
 
     void Update()
     {
-        // If any blocking dialog is open, ignore interactions entirely
+        // Hard block when any modal UI is open
         if (UiInputGuard.IsBlocked) return;
 
         if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
         {
-            // When a blocking dialog is open, we already returned.
-            // When no dialog is open, we ALLOW world clicks even if pointer is over HUD.
-            // (If you want a specific "blocker" panel to prevent clicks, make THAT dialog push the guard.)
+            // By design we ALLOW clicks through non-blocking HUD.
+            // If you need a UI to block, give that panel a UIBlocker.
             TryInteractAtMouse();
         }
-
-    }
-
-    private bool IsPointerOverUI()
-    {
-        if (EventSystem.current == null) return false;
-
-        // Mouse & touch-safe check
-        if (EventSystem.current.IsPointerOverGameObject()) return true;
-        for (int i = 0; i < Input.touchCount; i++)
-            if (EventSystem.current.IsPointerOverGameObject(Input.GetTouch(i).fingerId))
-                return true;
-
-        return false;
     }
 
     private void TryInteractAtMouse()
