@@ -5,66 +5,156 @@ using UnityEngine.UI;
 using TMPro;
 using Game.Items;
 
-/// <summary>
-/// Builds and displays the item tooltip beside an inventory slot.
-/// Prefers right side of the slot and auto-flips if out of screen bounds.
-/// </summary>
+[DisallowMultipleComponent]
 public class ItemTooltipUI : MonoBehaviour
 {
     [Header("Wiring")]
     [SerializeField] private TMP_Text title;
     [SerializeField] private TMP_Text subtitleRarity;
     [SerializeField] private RectTransform lineContainer;
-    [SerializeField] private TMP_Text description;               // hidden for now (no description)
-    [SerializeField] private GameObject linePrefab;              // a TMP_Text prefab for lines
+    [SerializeField] private TMP_Text description;          // optional
+    [SerializeField] private GameObject linePrefab;         // optional (TMP_Text)
     [SerializeField] private TooltipAnchorBeside anchor;
 
     [Header("Style")]
-    [SerializeField] private Color blessedColor = new(1f, 0.9f, 0.3f); // warm gold
+    [SerializeField] private Color blessedColor = new(1f, 0.9f, 0.3f);
     [SerializeField] private Color labelGrey = new(0.75f, 0.75f, 0.75f);
 
-    private void Awake()
+    [Header("Fade")]
+    [SerializeField] private float fadeDuration = 0.2f;
+    [SerializeField] private AnimationCurve fadeCurve = null; // set in Inspector (defaults to linear if null)
+
+    private CanvasGroup _cg;
+    private InventorySlotTooltip _owner;
+    private Coroutine _fadeCo;
+
+    void Awake()
     {
-        gameObject.SetActive(false);
+        _cg = GetComponent<CanvasGroup>();
+        if (!_cg) _cg = gameObject.AddComponent<CanvasGroup>();
+
+        // Keep GO ACTIVE at all times; visibility via alpha
+        _cg.alpha = 0f;               // hidden by default
+        _cg.interactable = false;     // tooltip never blocks input
+        _cg.blocksRaycasts = false;
     }
 
-    private void OnDisable()
+    // Single OnDisable (avoid duplicates)
+    void OnDisable()
     {
-        // stop following when hidden
         anchor?.Detach();
+        _owner = null;
+        // leave alpha as-is; typically 0 by the time we disable the canvas/panel
     }
 
-    // ----------------------------------------------------------------------
+    // -------- Owner-guarded API (prevents random hides from other slots) --------
+    public void ShowFrom(InventorySlotTooltip owner, ItemInstance inst, RectTransform target)
+    {
+        _owner = owner;
+        Show(inst, target);
+    }
 
+    public void HideOwner(InventorySlotTooltip owner)
+    {
+        if (_owner != null && _owner != owner) return; // ignore hides from others
+        _owner = null;
+        Hide();
+    }
+
+    // ----------------------------- Public API ----------------------------------
+    /// <summary>Show & place the tooltip. Safe even when called right after creating slots.</summary>
     public void Show(ItemInstance inst, RectTransform target)
     {
         if (inst == null || inst.def == null) return;
 
+        transform.SetAsLastSibling();   // render above everything
+
+        // Build content first (GO stays active; layout has valid sizes)
         Build(inst);
 
-        if (anchor && target)
-        {
-            anchor.Attach(target);
-            anchor.RepositionNow();
-        }
+        // Follow target
+        if (anchor && target) anchor.Attach(target);
 
-        gameObject.SetActive(true);
+        // First-pass layout & placement
+        var rt = (RectTransform)transform;
+        Canvas.ForceUpdateCanvases();
+        LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
+        anchor?.RepositionNow();
+
+        // Ensure we are visible (fade to 1)
+        StartFade(1f);
+
+        // Second-pass placement (after TMP/Layout settle at end of frame)
+        var eof = PlaceAfterLayout();
+        if (isActiveAndEnabled) StartCoroutine(eof);
+        else UiCoroutineRunner.Run(eof);
     }
 
     public void Hide()
     {
         anchor?.Detach();
-        gameObject.SetActive(false);
+        StartFade(0f);
     }
 
-    // ----------------------------------------------------------------------
+    // ---------------------------- Internals ------------------------------------
+    private System.Collections.IEnumerator PlaceAfterLayout()
+    {
+        // Allow one frame so TMP preferred sizes resolve
+        yield return null;
+        // And end-of-frame so ContentSizeFitter/VerticalLayoutGroup settle
+        yield return new WaitForEndOfFrame();
+
+        if (!this || !gameObject.activeInHierarchy) yield break;
+
+        var rt = (RectTransform)transform;
+        Canvas.ForceUpdateCanvases();
+        LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
+        anchor?.RepositionNow();
+    }
+
+    private void StartFade(float targetAlpha)
+    {
+        if (_fadeCo != null) StopCoroutine(_fadeCo);
+        _fadeCo = StartCoroutine(FadeTo(targetAlpha));
+    }
+
+    private System.Collections.IEnumerator FadeTo(float target)
+    {
+        if (_cg == null) yield break;
+
+        float start = _cg.alpha;
+        if (Mathf.Approximately(start, target)) yield break;
+
+        float t = 0f;
+        float dur = Mathf.Max(0f, fadeDuration);
+
+        // stay non-blocking; if you ever want it to block, flip blocksRaycasts accordingly
+        _cg.blocksRaycasts = false;
+
+        if (dur <= 0f)
+        {
+            _cg.alpha = target;
+            yield break;
+        }
+
+        while (t < dur)
+        {
+            t += Time.unscaledDeltaTime; // UI fades independent of timescale
+            float k = Mathf.Clamp01(t / dur);
+            float eased = fadeCurve != null ? fadeCurve.Evaluate(k) : k;
+            _cg.alpha = Mathf.Lerp(start, target, eased);
+            yield return null;
+        }
+
+        _cg.alpha = target;
+    }
 
     private void Build(ItemInstance inst)
     {
         var def = inst.def;
         var tierColor = RarityRules.GetLabelColor(inst.tier);
 
-        // ----- RARITY (on top) -----
+        // ----- RARITY -----
         if (subtitleRarity)
         {
             subtitleRarity.gameObject.SetActive(true);
@@ -89,14 +179,13 @@ public class ItemTooltipUI : MonoBehaviour
             title.fontSize = 18;
         }
 
-        // ----- Clear previous stat lines -----
+        // ----- CLEAR LINES -----
         for (int i = lineContainer.childCount - 1; i >= 0; i--)
             Destroy(lineContainer.GetChild(i).gameObject);
 
-        // First divider
         AddSeparator();
 
-        // ================= CATEGORY-SPECIFIC STATS =================
+        // ----- STATS -----
         var sb = new StringBuilder();
 
         if (def.category == ItemCategory.Weapon)
@@ -133,10 +222,9 @@ public class ItemTooltipUI : MonoBehaviour
         }
         else if (def.category == ItemCategory.Accessory)
         {
-            // place for accessory lines (ring/amulet bonuses)
+            // reserved for accessory lines
         }
 
-        // Render the stats block
         if (sb.Length > 0)
         {
             var lines = sb.ToString().TrimEnd('\n').Split('\n');
@@ -144,17 +232,17 @@ public class ItemTooltipUI : MonoBehaviour
             AddSeparator();
         }
 
-        // ================= REQUIREMENTS + TYPE =================
+        // ----- REQS + TYPE -----
         AddLine(StatLine("Required Level", $"{def.requirements.level}"));
-        AddLine(StatLine("Type", EquipTypeLabel(def))); // <- replaces Slot/Main/Off Hand
-        AddSeparator(height: 10f, alpha: 0f); // spacer
+        AddLine(StatLine("Type", EquipTypeLabel(def)));
+        AddSeparator(height: 10f, alpha: 0f);
 
-        // ================= VALUE =================
+        // ----- VALUE -----
         var valueLine = AddLine(StatLine("Value", $"{inst.EffectiveValue} Gold"));
         valueLine.alignment = TextAlignmentOptions.Right;
         valueLine.fontStyle = FontStyles.Italic;
 
-        // ================= OPTIONALS =================
+        // ----- OPTIONALS -----
         if (description) description.gameObject.SetActive(false);
 
         if (inst.isBlessed)
@@ -165,9 +253,12 @@ public class ItemTooltipUI : MonoBehaviour
                 line.color = blessedColor;
             }
         }
-    }
 
-    // ----------------------------------------------------------------------
+        // Ensure rect is up to date before first placement
+        var rt = (RectTransform)transform;
+        Canvas.ForceUpdateCanvases();
+        LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
+    }
 
     private TMP_Text AddLine(string text)
     {
@@ -189,7 +280,7 @@ public class ItemTooltipUI : MonoBehaviour
             rt = go.transform as RectTransform;
         }
 
-        // Normalize rect so each line stretches full width of the LineContainer
+        // stretch across container
         if (rt != null)
         {
             rt.anchorMin = new Vector2(0f, 0.5f);
@@ -230,7 +321,7 @@ public class ItemTooltipUI : MonoBehaviour
         rt.anchorMin = new Vector2(0, 0.5f);
         rt.anchorMax = new Vector2(1, 0.5f);
         rt.pivot = new Vector2(0.5f, 0.5f);
-        rt.sizeDelta = new Vector2(0, 1f);
+        rt.sizeDelta = new Vector2(0, 1);
 
         var spacerBottom = new GameObject("Sep_SpaceBottom", typeof(RectTransform), typeof(LayoutElement));
         spacerBottom.transform.SetParent(lineContainer, false);
@@ -243,10 +334,9 @@ public class ItemTooltipUI : MonoBehaviour
         return $"<color=#{hex}>{label}:</color> {value}";
     }
 
-    // New: human-friendly type label for weapons/armor/off-hand items
+    // Human-friendly type label
     private static string EquipTypeLabel(ItemDefinition def)
     {
-        // Off-hand only items first
         if (def.grip == WeaponGrip.OffHandOnly)
         {
             return def.subtype switch
@@ -259,7 +349,6 @@ public class ItemTooltipUI : MonoBehaviour
             };
         }
 
-        // Weapons
         if (def.category == ItemCategory.Weapon)
         {
             string hand = def.grip switch
@@ -268,13 +357,10 @@ public class ItemTooltipUI : MonoBehaviour
                 WeaponGrip.OneHanded => "One-Handed",
                 _ => null
             };
-
-            // Sword, Axe, Bow, Dagger, Staff, Mace, Spear, etc.
             string kind = def.subtype.ToString();
             return hand != null ? $"{hand} {kind}" : kind;
         }
 
-        // Armor / Accessories – rename Legs -> Pants (already in enum)
         return def.subtype switch
         {
             ItemSubtype.Helmet => "Helmet",

@@ -106,11 +106,11 @@ public class InventoryUI : MonoBehaviour
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
 
-        // Preferred: switch to UI map if it exists
+        // Switch input map
         if (playerInput && playerInput.actions.FindActionMap("UI") != null)
             playerInput.SwitchCurrentActionMap("UI");
 
-        // Hard stop gameplay actions regardless of maps
+        // Disable gameplay inputs
         moveAction?.Disable();
         lookAction?.Disable();
         dodgeAction?.Disable();
@@ -118,6 +118,21 @@ public class InventoryUI : MonoBehaviour
         moveClickAction?.Disable();
 
         if (cinInput) cinInput.enabled = false;
+
+        // ✅ Defer the hover replay one *extra* frame so raycasts see new items
+        UiCoroutineRunner.Run(OpenAfterDelay());
+    }
+
+    private System.Collections.IEnumerator OpenAfterDelay()
+    {
+        // Wait one frame for panel to become active
+        yield return null;
+
+        // Wait one more end-of-frame for all layout & TMP updates
+        yield return new WaitForEndOfFrame();
+
+        // Now replay the pointer enter safely
+        yield return ReplayPointerEnterUnderCursor();
     }
 
     public void Close()
@@ -311,9 +326,6 @@ public class InventoryUI : MonoBehaviour
             contRect.SetAsLastSibling();
             _itemViews.Add(container);
 
-
-
-
             // Optional: dim covered cells
             for (int dy = 0; dy < h; dy++)
                 for (int dx = 0; dx < w; dx++)
@@ -324,7 +336,95 @@ public class InventoryUI : MonoBehaviour
                 }
         }
 
+        if (isOpen && EventSystem.current != null)
+        {
+            StartCoroutine(TriggerTooltipUnderCursorNextFrame());
+        }
     }
+
+    private System.Collections.IEnumerator TriggerTooltipUnderCursorNextFrame()
+    {
+        // Let layout settle this frame.
+        yield return null;
+
+        var es = EventSystem.current;
+        var ped = new PointerEventData(es)
+        {
+#if ENABLE_INPUT_SYSTEM
+        position = UnityEngine.InputSystem.Mouse.current != null
+            ? UnityEngine.InputSystem.Mouse.current.position.ReadValue()
+            : (Vector2)Input.mousePosition
+#else
+            position = (Vector2)Input.mousePosition
+#endif
+        };
+
+        var results = new System.Collections.Generic.List<RaycastResult>();
+        es.RaycastAll(ped, results);
+
+        for (int i = 0; i < results.Count; i++)
+        {
+            var tip = results[i].gameObject.GetComponent<InventorySlotTooltip>()
+                      ?? results[i].gameObject.GetComponentInParent<InventorySlotTooltip>();
+            if (tip != null)
+            {
+                tip.OnPointerEnter(ped);
+                break;
+            }
+        }
+    }
+
+    // Replay pointer-enter events to restore tooltips after UI changes 
+    private System.Collections.IEnumerator ReplayPointerEnterUnderCursor()
+    {
+        // Let the panel open, Refresh() build views, and layouts settle (TMP/layout ready).
+        yield return null;                       // 1 frame
+        yield return new WaitForEndOfFrame();    // after layout/TMP
+
+        var es = EventSystem.current;
+        if (es == null) yield break;
+
+        // Mouse position (prefers New Input System if available)
+        Vector2 pos;
+#if ENABLE_INPUT_SYSTEM
+    pos = UnityEngine.InputSystem.Mouse.current != null
+        ? UnityEngine.InputSystem.Mouse.current.position.ReadValue()
+        : (Vector2)Input.mousePosition;
+#else
+        pos = (Vector2)Input.mousePosition;
+#endif
+
+        var eventData = new PointerEventData(es) { position = pos };
+
+        // Raycast UI under cursor
+        var results = new System.Collections.Generic.List<RaycastResult>();
+        es.RaycastAll(eventData, results);
+        if (results.Count == 0) yield break;
+
+        // Some UI logic listens for pointerMove to consider "hovering"
+        for (int i = 0; i < results.Count; i++)
+            ExecuteEvents.Execute(results[i].gameObject, eventData, ExecuteEvents.pointerMoveHandler);
+
+        // Send pointer-enter to everything hit (harmless; idempotent per element)
+        for (int i = 0; i < results.Count; i++)
+            ExecuteEvents.Execute(results[i].gameObject, eventData, ExecuteEvents.pointerEnterHandler);
+
+        // Robust fallback: find the first element (or parent) with InventorySlotTooltip
+        InventorySlotTooltip foundTip = null;
+        for (int i = 0; i < results.Count && foundTip == null; i++)
+        {
+            var go = results[i].gameObject;
+            foundTip = go.GetComponent<InventorySlotTooltip>() ?? go.GetComponentInParent<InventorySlotTooltip>();
+        }
+
+        // If we found a tooltip target, explicitly invoke its enter handler
+        if (foundTip != null)
+        {
+            foundTip.OnPointerEnter(eventData);
+        }
+    }
+
+
 
     // --- Cell highlighting (used during drag preview) ---
     public void HighlightCells(int x, int y, int w, int h, Color color)

@@ -121,7 +121,7 @@ Material:
     - _DstBlend: 0
     - _DstBlendAlpha: 0
     - _EnvironmentReflections: 1
-    - _FaceDilate: 0.1
+    - _FaceDilate: -1
     - _FaceUVSpeedX: 0
     - _FaceUVSpeedY: 0
     - _GlossMapScale: 0
@@ -147,8 +147,8 @@ Material:
     - _ReceiveShadows: 1
     - _Reflectivity: 10
     - _ScaleRatioA: 0.9
-    - _ScaleRatioB: 0.6975
-    - _ScaleRatioC: 0.4359375
+    - _ScaleRatioB: 1.6875
+    - _ScaleRatioC: 1.0546875
     - _ScaleX: 1
     - _ScaleY: 1
     - _ShaderFlags: 0
