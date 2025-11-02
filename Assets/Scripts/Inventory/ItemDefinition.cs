@@ -1,9 +1,8 @@
-using UnityEngine;
-using Game.Items; // CharacterClass, ItemCategory, ItemSubtype, ItemTier, ItemRequirements, DamageProfile, SocketSlotType, WeaponGrip
-
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
+using UnityEngine;
+using Game.Items;
 
 /// <summary>
 /// Per-item tuning used ONLY for the inventory/UI 3D preview.
@@ -111,7 +110,6 @@ public class ItemDefinition : ScriptableObject
 
     // ---------------------- Blessing & Sockets ----------------------
 
-    [Header("Blessing & Sockets")]
     [Tooltip("Whether this item type can roll as Blessed.")]
     public bool canBeBlessed = true;
 
@@ -119,7 +117,8 @@ public class ItemDefinition : ScriptableObject
     public SocketSlotType socketSlotType = SocketSlotType.Weapon;
 
     [Tooltip("Max sockets this item can have (Rings/Amulets usually 1; weapons 0-4).")]
-    [Range(0, 4)] public int socketsMax = 0;
+    [HideInInspector][Min(0)] public int socketsMax = 0;
+
 
     // ---------------------- Tier / Rarity ----------------------
 
@@ -155,17 +154,92 @@ public class ItemDefinition : ScriptableObject
         // Auto-derive category from subtype if user edits subtype directly.
         category = EquipmentMapping.GetCategoryForSubtype(subtype);
 
+        // 🔧 Auto-infer grip from subtype (only if unset/None)
+        AutoInferGripIfUnset();
+
+        // 🔧 Normalize combat fields (editor safety)
+        NormalizeCombatFields();
+
         // Gentle clamping
         width  = Mathf.Max(1, width);
         height = Mathf.Max(1, height);
         baseDurability = Mathf.Max(1, baseDurability);
         baseValue = Mathf.Max(0, baseValue);
-        socketsMax = Mathf.Clamp(socketsMax, 0, 4);
+
+        // ❗ dynamic clamp based on footprint size (1x3 => 3, 1x1 => 1)
+        socketsMax = Mathf.Clamp(socketsMax, 0, CalcMaxSocketsLimit());
 
         // Ensure preview defaults are sane
         if (preview == null) preview = new ItemPreviewOptions();
         preview.padding = Mathf.Max(1.0f, preview.padding);
         preview.scale = Mathf.Max(0.001f, preview.scale);
+    }
+
+    // --- Helpers (editor-only) ------------------------------------------------
+
+    private void AutoInferGripIfUnset()
+    {
+        if (grip != WeaponGrip.None) return; // user already chose
+
+        switch (subtype)
+        {
+            case ItemSubtype.Shield:
+            case ItemSubtype.Orb:
+            case ItemSubtype.Book:
+            case ItemSubtype.Arrows:
+                grip = WeaponGrip.OffHandOnly; LogOnce($"Auto-set Grip = OffHandOnly for {subtype}"); break;
+
+            case ItemSubtype.Bow:
+            case ItemSubtype.Staff:
+                grip = WeaponGrip.TwoHanded;   LogOnce($"Auto-set Grip = TwoHanded for {subtype}"); break;
+
+            case ItemSubtype.Sword:
+            case ItemSubtype.Dagger:
+            case ItemSubtype.Axe:
+            case ItemSubtype.Mace:
+            case ItemSubtype.Spear:
+                grip = WeaponGrip.OneHanded;   LogOnce($"Auto-set Grip = OneHanded for {subtype}"); break;
+
+            default:
+                grip = WeaponGrip.None; break; // armor/accessories
+        }
+    }
+
+    private void NormalizeCombatFields()
+    {
+        // Crit Chance: allow 0..1, or 1..100 as %
+        if (baseDamage.critChance > 1f && baseDamage.critChance <= 100f)
+        { baseDamage.critChance /= 100f; LogOnce("Normalized Crit Chance from % to 0..1"); }
+        baseDamage.critChance = Mathf.Clamp01(baseDamage.critChance);
+
+        // Crit Multiplier: allow percent-like (e.g., 150 => 1.5)
+        if (baseDamage.critMultiplier >= 10f)
+        { baseDamage.critMultiplier /= 100f; LogOnce("Normalized Crit Multiplier from % to factor"); }
+        baseDamage.critMultiplier = Mathf.Clamp(baseDamage.critMultiplier, 1.0f, 5.0f);
+
+        // Attack Speed: avoid zero/negative
+        if (baseDamage.attackSpeed <= 0f) { baseDamage.attackSpeed = 1f; LogOnce("Attack Speed was <= 0; set to 1"); }
+        else baseDamage.attackSpeed = Mathf.Clamp(baseDamage.attackSpeed, 0.05f, 50f);
+
+        // Keep damage sane
+        baseDamage.min = Mathf.Max(0, baseDamage.min);
+        baseDamage.max = Mathf.Max(baseDamage.min, baseDamage.max);
+        baseDamage.wizardry = Mathf.Max(0, baseDamage.wizardry);
+    }
+
+    private int CalcMaxSocketsLimit()
+    {
+        // Rule: max sockets <= footprint cells (e.g., 1x3 => 3, 1x1 => 1)
+        return Mathf.Max(1, width * height);
+    }
+
+    [System.NonSerialized] private bool _loggedThisFrame;
+    private void LogOnce(string msg)
+    {
+        if (_loggedThisFrame) return;
+        _loggedThisFrame = true;
+        EditorApplication.delayCall += () => { _loggedThisFrame = false; };
+        Debug.Log($"[ItemDefinition:{name}] {msg}");
     }
 
     [ContextMenu("Sync Legacy Rarity -> Tier (one-time)")]
