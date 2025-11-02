@@ -36,30 +36,21 @@ public class ItemTooltipUI : MonoBehaviour
 
     // ----------------------------------------------------------------------
 
-    /// <summary>
-    /// Show tooltip for given item beside the given target RectTransform.
-    /// </summary>
     public void Show(ItemInstance inst, RectTransform target)
     {
         if (inst == null || inst.def == null) return;
 
-        // 1) Build content (does not activate yet)
         Build(inst);
 
-        // 2) Position beside target (prefer right side)
         if (anchor && target)
         {
             anchor.Attach(target);
             anchor.RepositionNow();
         }
 
-        // 3) Now show (after positioned)
         gameObject.SetActive(true);
     }
 
-    /// <summary>
-    /// Hide tooltip and detach anchor.
-    /// </summary>
     public void Hide()
     {
         anchor?.Detach();
@@ -68,9 +59,6 @@ public class ItemTooltipUI : MonoBehaviour
 
     // ----------------------------------------------------------------------
 
-    /// <summary>
-    /// Builds tooltip UI content for given item.
-    /// </summary>
     private void Build(ItemInstance inst)
     {
         var def = inst.def;
@@ -84,19 +72,21 @@ public class ItemTooltipUI : MonoBehaviour
             subtitleRarity.color = tierColor;
             subtitleRarity.enableAutoSizing = false;
             subtitleRarity.fontStyle = FontStyles.SmallCaps;
-            subtitleRarity.fontWeight = FontWeight.Medium;   // thinner than bold
-            subtitleRarity.fontSize = 12;                  // fixed size keeps hierarchy tidy
+            subtitleRarity.fontWeight = FontWeight.Medium;
+            subtitleRarity.fontSize = 14;
+            subtitleRarity.alignment = TextAlignmentOptions.Center;
         }
 
-        // ----- NAME (thinner, not bold) -----
+        // ----- NAME -----
         if (title)
         {
             title.text = string.IsNullOrEmpty(def.displayName) ? "Item" : def.displayName;
-            title.color = Color.white;            // keep neutral; rarity gets the color
-            title.fontStyle = FontStyles.Normal; // not italic/bold
-            title.fontWeight = FontWeight.Medium; // slimmer look
+            title.color = new Color(0.9f, 0.9f, 0.9f);
+            title.fontStyle = FontStyles.Normal;
+            title.fontWeight = FontWeight.Medium;
+            title.alignment = TextAlignmentOptions.Center;
             title.enableAutoSizing = false;
-            title.fontSize = 16;
+            title.fontSize = 18;
         }
 
         // ----- Clear previous stat lines -----
@@ -111,7 +101,6 @@ public class ItemTooltipUI : MonoBehaviour
 
         if (def.category == ItemCategory.Weapon)
         {
-            // Wizardry weapons show "Wizardry Attack", others show "Attack Power"
             bool isWizardWeapon = def.baseDamage.wizardry > 0;
             string atkLabel = isWizardWeapon ? "Wizardry Attack" : "Attack Power";
 
@@ -126,7 +115,6 @@ public class ItemTooltipUI : MonoBehaviour
             if (def.baseDamage.attackSpeed > 0)
                 sb.AppendLine(StatLine("Attack Speed", $"{inst.EffectiveAttackSpeed:0.00}"));
 
-            // Durability is useful on all equippable items
             sb.AppendLine(StatLine("Durability", $"{inst.currentDurability}/{def.baseDurability}"));
         }
         else if (def.category == ItemCategory.Armor || def.subtype == ItemSubtype.Shield)
@@ -145,7 +133,7 @@ public class ItemTooltipUI : MonoBehaviour
         }
         else if (def.category == ItemCategory.Accessory)
         {
-            // Hook for EquipmentStats when ready (Strength/Agility/Intellect/Stamina, etc.)
+            // place for accessory lines (ring/amulet bonuses)
         }
 
         // Render the stats block
@@ -156,15 +144,15 @@ public class ItemTooltipUI : MonoBehaviour
             AddSeparator();
         }
 
-        // ================= REQUIREMENTS =================
+        // ================= REQUIREMENTS + TYPE =================
         AddLine(StatLine("Required Level", $"{def.requirements.level}"));
-        var slot = EquipmentMapping.GetSlotForSubtype(def.subtype);
-        AddLine(StatLine("Slot", SlotToText(slot)));
-        AddSeparator();
+        AddLine(StatLine("Type", EquipTypeLabel(def))); // <- replaces Slot/Main/Off Hand
+        AddSeparator(height: 10f, alpha: 0f); // spacer
 
         // ================= VALUE =================
-        AddLine(StatLine("Value", $"{inst.EffectiveValue} Gold"));
-        AddSeparator();
+        var valueLine = AddLine(StatLine("Value", $"{inst.EffectiveValue} Gold"));
+        valueLine.alignment = TextAlignmentOptions.Right;
+        valueLine.fontStyle = FontStyles.Italic;
 
         // ================= OPTIONALS =================
         if (description) description.gameObject.SetActive(false);
@@ -177,7 +165,6 @@ public class ItemTooltipUI : MonoBehaviour
                 line.color = blessedColor;
             }
         }
-        // Sockets block can be enabled later
     }
 
     // ----------------------------------------------------------------------
@@ -185,52 +172,59 @@ public class ItemTooltipUI : MonoBehaviour
     private TMP_Text AddLine(string text)
     {
         TMP_Text tmp = null;
+        RectTransform rt = null;
 
         if (linePrefab != null)
         {
             var go = Instantiate(linePrefab, lineContainer);
             tmp = go.GetComponent<TMP_Text>();
+            rt = go.transform as RectTransform;
         }
 
-        // Fallback: create a TMP_Text if prefab missing/misconfigured
         if (tmp == null)
         {
-            var go = new GameObject("Line", typeof(RectTransform), typeof(TextMeshProUGUI));
+            var go = new GameObject("TextLine", typeof(RectTransform), typeof(TextMeshProUGUI));
             go.transform.SetParent(lineContainer, false);
             tmp = go.GetComponent<TextMeshProUGUI>();
+            rt = go.transform as RectTransform;
+        }
 
-            var rt = (RectTransform)go.transform;
-            rt.anchorMin = new Vector2(0, 0.5f);
-            rt.anchorMax = new Vector2(1, 0.5f);
-            rt.pivot = new Vector2(0, 0.5f);
-            rt.sizeDelta = new Vector2(0, 20);
+        // Normalize rect so each line stretches full width of the LineContainer
+        if (rt != null)
+        {
+            rt.anchorMin = new Vector2(0f, 0.5f);
+            rt.anchorMax = new Vector2(1f, 0.5f);
+            rt.pivot = new Vector2(0f, 0.5f);
+            rt.sizeDelta = new Vector2(0f, 20f);
+            rt.anchoredPosition = new Vector2(0f, rt.anchoredPosition.y);
+
+            var le = rt.GetComponent<LayoutElement>() ?? rt.gameObject.AddComponent<LayoutElement>();
+            le.minWidth = 0f;
+            le.preferredWidth = -1f;
+            le.flexibleWidth = 1f;
         }
 
         tmp.text = text;
-        tmp.color = new Color(0.92f, 0.92f, 0.92f);
+        tmp.color = new Color(0.85f, 0.85f, 0.85f);
         tmp.fontStyle = FontStyles.Normal;
         tmp.fontWeight = FontWeight.Regular;
         tmp.enableAutoSizing = false;
-        tmp.fontSize = 13;
+        tmp.fontSize = 14;
         tmp.alignment = TextAlignmentOptions.Left;
+
         return tmp;
     }
 
-    /// <summary>
-    /// Inserts a subtle horizontal rule with small top/bottom spacing.
-    /// </summary>
     private void AddSeparator(float height = 6f, float alpha = 0.15f)
     {
-        // top space
         var spacerTop = new GameObject("Sep_SpaceTop", typeof(RectTransform), typeof(LayoutElement));
         spacerTop.transform.SetParent(lineContainer, false);
         spacerTop.GetComponent<LayoutElement>().preferredHeight = Mathf.Max(0, (height - 1f) * 0.5f);
 
-        // the line
         var line = new GameObject("Separator", typeof(RectTransform), typeof(Image));
         line.transform.SetParent(lineContainer, false);
         var img = line.GetComponent<Image>();
-        img.color = new Color(0f, 0f, 0f, alpha); // subtle dark line
+        img.color = new Color(0f, 0f, 0f, alpha);
 
         var rt = (RectTransform)line.transform;
         rt.anchorMin = new Vector2(0, 0.5f);
@@ -238,49 +232,59 @@ public class ItemTooltipUI : MonoBehaviour
         rt.pivot = new Vector2(0.5f, 0.5f);
         rt.sizeDelta = new Vector2(0, 1f);
 
-        // bottom space
         var spacerBottom = new GameObject("Sep_SpaceBottom", typeof(RectTransform), typeof(LayoutElement));
         spacerBottom.transform.SetParent(lineContainer, false);
         spacerBottom.GetComponent<LayoutElement>().preferredHeight = Mathf.Max(0, (height - 1f) * 0.5f);
     }
 
-    /// <summary>
-    /// Formats a stat line with a grey label and white value (no bullet).
-    /// </summary>
     private string StatLine(string label, string value)
     {
         var hex = ColorUtility.ToHtmlStringRGB(labelGrey);
         return $"<color=#{hex}>{label}:</color> {value}";
     }
 
-    private static string SlotToText(EquipmentSlot slot) => slot switch
+    // New: human-friendly type label for weapons/armor/off-hand items
+    private static string EquipTypeLabel(ItemDefinition def)
     {
-        EquipmentSlot.Head => "Head",
-        EquipmentSlot.Chest => "Chest",
-        EquipmentSlot.Hands => "Hands",
-        EquipmentSlot.Legs => "Legs",
-        EquipmentSlot.Feet => "Feet",
-        EquipmentSlot.MainHand => "Main Hand",
-        EquipmentSlot.OffHand => "Off Hand",
-        EquipmentSlot.Ring1 or EquipmentSlot.Ring2 => "Ring",
-        EquipmentSlot.Amulet => "Amulet",
-        _ => slot.ToString()
-    };
-
-    private static string ClassesToText(CharacterClass flags)
-    {
-        if (flags == CharacterClass.All) return "All";
-        if (flags == CharacterClass.None) return "-";
-
-        StringBuilder sb = new();
-        foreach (CharacterClass c in new[] { CharacterClass.Knight, CharacterClass.Elf, CharacterClass.Wizard })
+        // Off-hand only items first
+        if (def.grip == WeaponGrip.OffHandOnly)
         {
-            if ((flags & c) != 0)
+            return def.subtype switch
             {
-                if (sb.Length > 0) sb.Append(", ");
-                sb.Append(c);
-            }
+                ItemSubtype.Shield => "Off-Hand Shield",
+                ItemSubtype.Orb => "Off-Hand Orb",
+                ItemSubtype.Book => "Off-Hand Book",
+                ItemSubtype.Arrows => "Off-Hand Arrows",
+                _ => "Off-Hand"
+            };
         }
-        return sb.ToString();
+
+        // Weapons
+        if (def.category == ItemCategory.Weapon)
+        {
+            string hand = def.grip switch
+            {
+                WeaponGrip.TwoHanded => "Two-Handed",
+                WeaponGrip.OneHanded => "One-Handed",
+                _ => null
+            };
+
+            // Sword, Axe, Bow, Dagger, Staff, Mace, Spear, etc.
+            string kind = def.subtype.ToString();
+            return hand != null ? $"{hand} {kind}" : kind;
+        }
+
+        // Armor / Accessories – rename Legs -> Pants (already in enum)
+        return def.subtype switch
+        {
+            ItemSubtype.Helmet => "Helmet",
+            ItemSubtype.Chest => "Chest",
+            ItemSubtype.Gloves => "Gloves",
+            ItemSubtype.Boots => "Boots",
+            ItemSubtype.Pants => "Pants",
+            ItemSubtype.Ring => "Ring",
+            ItemSubtype.Amulet => "Amulet",
+            _ => def.subtype.ToString()
+        };
     }
 }

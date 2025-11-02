@@ -20,7 +20,8 @@ namespace Game.Items
         Material
     }
 
-    // Specific item kind (used for filtering, naming, etc.)
+    // NOTE: Adding new enum values in the MIDDLE will reindex existing assets.
+    // To stay safe, we APPEND new values at the END of the list.
     public enum ItemSubtype
     {
         // Weapons
@@ -30,7 +31,13 @@ namespace Game.Items
         Helmet, Chest, Gloves, Boots, Pants,
 
         // Accessories
-        Ring, Amulet
+        Ring, Amulet,
+
+        // --- APPENDED (safe for existing serialized assets) -------------------
+        Spear,     // weapon
+        Orb,       // off-hand
+        Book,      // off-hand
+        Arrows     // off-hand (quiver)
     }
 
     // Slot on the character model where this item is equipped
@@ -58,7 +65,10 @@ namespace Game.Items
             ItemSubtype.Gloves => EquipmentSlot.Hands,
             ItemSubtype.Boots => EquipmentSlot.Feet,
             ItemSubtype.Pants => EquipmentSlot.Legs,
-            ItemSubtype.Shield => EquipmentSlot.OffHand,
+
+            ItemSubtype.Shield or ItemSubtype.Orb or ItemSubtype.Book or ItemSubtype.Arrows
+                => EquipmentSlot.OffHand,
+
             _ => EquipmentSlot.MainHand
         };
 
@@ -74,7 +84,16 @@ namespace Game.Items
         };
     }
 
-    // --- New additions (from the spec) ---------------------------------------
+    // --- New additions --------------------------------------------------------
+
+    // Weapon handling for UI/labeling (doesn't replace EquipmentSlot)
+    public enum WeaponGrip
+    {
+        None,        // non-weapon or unspecified
+        OneHanded,
+        TwoHanded,
+        OffHandOnly  // arrows, shield, orb, book, etc.
+    }
 
     // Who can equip (flags so you can combine: Knight|Elf, etc.)
     [System.Flags]
@@ -136,7 +155,6 @@ namespace Game.Items
 
     public static class RarityTierBridge
     {
-        // Use while migrating: map your old ItemRarity to the richer ItemTier
         public static ItemTier ToTier(this ItemRarity r) => r switch
         {
             ItemRarity.Common => ItemTier.Common,
@@ -145,17 +163,16 @@ namespace Game.Items
             _ => ItemTier.Common
         };
 
-        // Palette suggestion for ItemTier labels (ui convenience)
         public static Color TierColor(ItemTier tier) => tier switch
         {
             ItemTier.Common => Color.grey,
-            ItemTier.Magical => new Color(0.35f, 0.55f, 1f),      // Blue
-            ItemTier.Rare => new Color(1f, 0.9f, 0.3f),         // Yellow
-            ItemTier.UltraRare => new Color(1f, 0.55f, 0.15f),       // Orange
-            ItemTier.Epic => new Color(0.7f, 0.35f, 0.9f),      // Purple
-            ItemTier.Legendary => new Color(0.35f, 1f, 0.35f),       // Green
-            ItemTier.Mythical => new Color(0.2f, 0.95f, 0.9f),      // Turquoise
-            ItemTier.Godlike => Color.white,                       // animate later
+            ItemTier.Magical => new Color(0.35f, 0.55f, 1f),  // Blue
+            ItemTier.Rare => new Color(1f, 0.9f, 0.3f),       // Yellow
+            ItemTier.UltraRare => new Color(1f, 0.55f, 0.15f),// Orange
+            ItemTier.Epic => new Color(0.7f, 0.35f, 0.9f),    // Purple
+            ItemTier.Legendary => new Color(0.35f, 1f, 0.35f),// Green
+            ItemTier.Mythical => new Color(0.2f, 0.95f, 0.9f),// Turquoise
+            ItemTier.Godlike => Color.white,
             ItemTier.EventItem => Color.white,
             _ => Color.white
         };

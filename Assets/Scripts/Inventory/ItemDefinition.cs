@@ -1,5 +1,5 @@
 using UnityEngine;
-using Game.Items; // CharacterClass, ItemCategory, ItemSubtype, ItemTier, ItemRequirements, DamageProfile, SocketSlotType
+using Game.Items; // CharacterClass, ItemCategory, ItemSubtype, ItemTier, ItemRequirements, DamageProfile, SocketSlotType, WeaponGrip
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -64,6 +64,10 @@ public class ItemDefinition : ScriptableObject
     [Header("Classification")]
     public ItemCategory category = ItemCategory.Weapon;
     public ItemSubtype subtype = ItemSubtype.Sword;
+
+    [Header("Weapon Handling")]
+    [Tooltip("How this weapon is held. For non-weapons leave as None.")]
+    public WeaponGrip grip = WeaponGrip.None;
 
     // ---------------------- Requirements ----------------------
 
@@ -146,8 +150,6 @@ public class ItemDefinition : ScriptableObject
     };
 
 #if UNITY_EDITOR
-    // Optional editor niceties (safe to remove if you prefer a clean runtime-only file)
-
     private void OnValidate()
     {
         // Auto-derive category from subtype if user edits subtype directly.
