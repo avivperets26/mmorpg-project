@@ -281,6 +281,9 @@ public class PlayerController : MonoBehaviour
 
     public void OnEmoteWheel(InputAction.CallbackContext ctx)
     {
+        // Ignore while any blocking UI is open
+        if (UiInputGuard.IsBlocked) return;
+
         if (ctx.started) Debug.Log("Emote Wheel Open");
         if (ctx.canceled) Debug.Log("Emote Wheel Close");
     }

@@ -34,7 +34,7 @@ public class InventoryUI : MonoBehaviour
     // Item views that span multiple cells
     private readonly List<GameObject> _itemViews = new();
 
-    private InputAction moveAction, lookAction, dodgeAction, attackAction, moveClickAction;
+    private InputAction moveAction, lookAction, dodgeAction, attackAction, moveClickAction, emoteWheelAction; // ← ADD
 
     private void Awake()
     {
@@ -59,6 +59,7 @@ public class InventoryUI : MonoBehaviour
             dodgeAction = a.FindAction("Dodge");
             attackAction = a.FindAction("PrimaryAttack");
             moveClickAction = a.FindAction("MoveClick");
+            emoteWheelAction = a.FindAction("EmoteWheel");
         }
 
         // ⬇️ this line is required to build the cell grid & hook events
@@ -102,6 +103,9 @@ public class InventoryUI : MonoBehaviour
         if (isOpen) return;
         isOpen = true;
 
+        // Block gameplay interactions globally
+        UiInputGuard.Push(this);
+
         if (inventoryPanel) inventoryPanel.SetActive(true);
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
@@ -116,10 +120,10 @@ public class InventoryUI : MonoBehaviour
         dodgeAction?.Disable();
         attackAction?.Disable();
         moveClickAction?.Disable();
+        emoteWheelAction?.Disable();
 
         if (cinInput) cinInput.enabled = false;
 
-        // ✅ Defer the hover replay one *extra* frame so raycasts see new items
         UiCoroutineRunner.Run(OpenAfterDelay());
     }
 
@@ -140,6 +144,9 @@ public class InventoryUI : MonoBehaviour
         if (!isOpen) return;
         isOpen = false;
 
+        // Unblock gameplay interactions
+        UiInputGuard.Pop(this);
+
         if (inventoryPanel) inventoryPanel.SetActive(false);
 
         if (playerInput && playerInput.actions.FindActionMap("Gameplay") != null)
@@ -151,10 +158,10 @@ public class InventoryUI : MonoBehaviour
         dodgeAction?.Enable();
         attackAction?.Enable();
         moveClickAction?.Enable();
+        emoteWheelAction?.Enable();
 
         if (cinInput) cinInput.enabled = true;
     }
-
 
     private void OnEnable()
     {
@@ -163,9 +170,11 @@ public class InventoryUI : MonoBehaviour
 
     private void OnDisable()
     {
+        if (isOpen) UiInputGuard.Pop(this);
         if (inventory != null) inventory.Changed -= Refresh;
         ClearItemViews();
     }
+
 
     private void BuildGrid()
     {
@@ -341,6 +350,12 @@ public class InventoryUI : MonoBehaviour
             StartCoroutine(TriggerTooltipUnderCursorNextFrame());
         }
     }
+
+    private void OnDestroy()
+    {
+        if (isOpen) UiInputGuard.Pop(this);
+    }
+
 
     private System.Collections.IEnumerator TriggerTooltipUnderCursorNextFrame()
     {

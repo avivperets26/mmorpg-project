@@ -1,6 +1,6 @@
-// Assets/Scripts/Interaction/PlayerInteractor.cs
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.EventSystems;
 
 [RequireComponent(typeof(CharacterController))]
 public class PlayerInteractor : MonoBehaviour
@@ -23,11 +23,30 @@ public class PlayerInteractor : MonoBehaviour
 
     void Update()
     {
-        // New Input System mouse click
+        // If any blocking dialog is open, ignore interactions entirely
+        if (UiInputGuard.IsBlocked) return;
+
         if (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)
         {
+            // When a blocking dialog is open, we already returned.
+            // When no dialog is open, we ALLOW world clicks even if pointer is over HUD.
+            // (If you want a specific "blocker" panel to prevent clicks, make THAT dialog push the guard.)
             TryInteractAtMouse();
         }
+
+    }
+
+    private bool IsPointerOverUI()
+    {
+        if (EventSystem.current == null) return false;
+
+        // Mouse & touch-safe check
+        if (EventSystem.current.IsPointerOverGameObject()) return true;
+        for (int i = 0; i < Input.touchCount; i++)
+            if (EventSystem.current.IsPointerOverGameObject(Input.GetTouch(i).fingerId))
+                return true;
+
+        return false;
     }
 
     private void TryInteractAtMouse()
@@ -42,7 +61,6 @@ public class PlayerInteractor : MonoBehaviour
             var interactable = hit.collider.GetComponentInParent<IInteractable>();
             if (interactable != null)
             {
-                // Optional range gate
                 if (requireInRange)
                 {
                     float dist = Vector3.Distance(transform.position, interactable.Transform.position);
