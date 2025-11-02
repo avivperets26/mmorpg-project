@@ -31,6 +31,8 @@ public class InventoryUI : MonoBehaviour
     [SerializeField] private int previewSize = 256;         // Base RT size (scaled by item footprint)
     [SerializeField] private InventoryDragController dragController; // Optional drag controller
     [HideInInspector] public InventoryItem dragHiddenItem;  // Temporarily hidden while dragging
+    [SerializeField] private EquipmentController equipmentController;
+
 
     // grid/cache
     private int _cols, _rows;
@@ -279,6 +281,10 @@ public class InventoryUI : MonoBehaviour
             view.raw = ivRaw;
             view.dragCtrl = dragController;
             view.previewTexture = rt;
+
+            // Equipment hookup
+            view.equipment = equipmentController;
+            view.inventory = inventory;
 
             // Tooltip hookup
             var tip = imgGO.GetComponent<InventorySlotTooltip>();

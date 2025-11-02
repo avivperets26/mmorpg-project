@@ -7,7 +7,7 @@ namespace Game.Items
     public class EquipmentItemDefinition : ItemDefinition
     {
         [Header("Equipment")]
-        public EquipmentSlot slot = EquipmentSlot.Head;
+        public EquipmentSlot slot = EquipmentSlot.Helm;   // ← was Head
 
         [Header("Stats & Set")]
         public EquipmentStats stats = new EquipmentStats();
@@ -22,9 +22,10 @@ namespace Game.Items
 
         private void OnValidate()
         {
-            // 'subtype' is inherited from ItemDefinition
-            slot = EquipmentMapping.GetSlotForSubtype(subtype);
-            // 'category' is auto-derived in ItemDefinition.OnValidate()
+            // Prefer our new mapper; if it can suggest a slot, take it.
+            if (EquipmentSlotMapper.TrySuggestSlot(this, out var primary, out var _))
+                slot = primary;
+            // 'category' continues to be derived in ItemDefinition.OnValidate()
         }
     }
 }

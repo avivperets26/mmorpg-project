@@ -5,11 +5,14 @@ using UnityEngine.UI;
 [RequireComponent(typeof(RawImage))]
 public class InventoryItemView : MonoBehaviour, IPointerClickHandler
 {
-    public InventoryItem item;               // set by InventoryUI when building views
-    public RectTransform container;          // the footprint container (parent)
-    public RawImage raw;                     // the image that shows the RT
-    public InventoryDragController dragCtrl; // injected by InventoryUI
+    public InventoryItem item;
+    public RectTransform container;
+    public RawImage raw;
+    public InventoryDragController dragCtrl;
     public Texture previewTexture;
+    public EquipmentController equipment;
+    public PlayerInventory inventory;
+
     private void Awake()
     {
         if (!raw) raw = GetComponent<RawImage>();
@@ -17,10 +20,21 @@ public class InventoryItemView : MonoBehaviour, IPointerClickHandler
 
     public void OnPointerClick(PointerEventData eventData)
     {
-        // Left-click picks up / places
         if (eventData.button == PointerEventData.InputButton.Left)
         {
+            // pick up / place inside grid (existing behavior)
             dragCtrl?.OnItemClicked(this);
+            return;
+        }
+
+        if (eventData.button == PointerEventData.InputButton.Right && item != null && item.def != null)
+        {
+            // Equip directly from inventory
+            if (equipment != null && equipment.TryEquip(item.def))
+            {
+                // remove from inventory grid
+                inventory?.Remove(item);
+            }
         }
     }
 }

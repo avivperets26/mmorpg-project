@@ -1,3 +1,4 @@
+// Assets/Scripts/Items/Equipment/EquipmentEnums.cs
 using UnityEngine;
 
 namespace Game.Items
@@ -35,49 +36,23 @@ namespace Game.Items
 
         // --- APPENDED (safe for existing serialized assets) -------------------
         Spear,     // weapon
-        Orb,       // off-hand
-        Book,      // off-hand
-        Arrows     // off-hand (quiver)
-    }
-
-    // Slot on the character model where this item is equipped
-    public enum EquipmentSlot
-    {
-        Head,       // Helmet
-        Chest,      // Chest armor
-        Hands,      // Gloves
-        Legs,       // Pants
-        Feet,       // Boots
-        MainHand,   // Weapon
-        OffHand,    // Shield or secondary
-        Ring1,      // Accessory
-        Ring2,      // Accessory
-        Amulet      // Accessory
+        Orb,       // off-hand focus
+        Book,      // off-hand tome
+        Arrows,    // quiver
+        Wings,     // back slot
+        Pet        // companion
     }
 
     // ---- Helpers (kept) ----
     public static class EquipmentMapping
     {
-        public static EquipmentSlot GetSlotForSubtype(ItemSubtype subtype) => subtype switch
-        {
-            ItemSubtype.Helmet => EquipmentSlot.Head,
-            ItemSubtype.Chest => EquipmentSlot.Chest,
-            ItemSubtype.Gloves => EquipmentSlot.Hands,
-            ItemSubtype.Boots => EquipmentSlot.Feet,
-            ItemSubtype.Pants => EquipmentSlot.Legs,
-
-            ItemSubtype.Shield or ItemSubtype.Orb or ItemSubtype.Book or ItemSubtype.Arrows
-                => EquipmentSlot.OffHand,
-
-            _ => EquipmentSlot.MainHand
-        };
-
+        // Only category is used by ItemDefinition.OnValidate
         public static ItemCategory GetCategoryForSubtype(ItemSubtype subtype) => subtype switch
         {
             ItemSubtype.Helmet or ItemSubtype.Chest or ItemSubtype.Gloves or ItemSubtype.Boots or ItemSubtype.Pants
                 => ItemCategory.Armor,
 
-            ItemSubtype.Ring or ItemSubtype.Amulet
+            ItemSubtype.Ring or ItemSubtype.Amulet or ItemSubtype.Wings or ItemSubtype.Pet or ItemSubtype.Orb or ItemSubtype.Book
                 => ItemCategory.Accessory,
 
             _ => ItemCategory.Weapon
@@ -86,7 +61,7 @@ namespace Game.Items
 
     // --- New additions --------------------------------------------------------
 
-    // Weapon handling for UI/labeling (doesn't replace EquipmentSlot)
+    // Weapon handling for UI/labeling (doesn't replace slots)
     public enum WeaponGrip
     {
         None,        // non-weapon or unspecified

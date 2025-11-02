@@ -1,7 +1,11 @@
+// Assets/Scripts/Inventory/InventoryDragController.cs
+using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
-using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
+using UnityEngine.UI;
+
 public class InventoryDragController : MonoBehaviour
 {
     [Header("Wiring")]
@@ -9,6 +13,7 @@ public class InventoryDragController : MonoBehaviour
     [SerializeField] private InventoryUI inventoryUI;     // to call Refresh() after place
     [SerializeField] private RectTransform gridRoot;      // same gridRoot used by InventoryUI
     [SerializeField] private Canvas canvas;               // root canvas (for ScreenPoint->LocalPoint)
+    [SerializeField] private EquipmentController equipmentController; // ← NEW (auto-filled if missing)
 
     [Header("Drag Visuals")]
     [Tooltip("Scale multiplier while dragging.")]
@@ -50,12 +55,20 @@ public class InventoryDragController : MonoBehaviour
 
         if (!gridRoot && inventoryUI != null)
         {
-            var f = typeof(InventoryUI).GetField("gridRoot", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            // grab InventoryUI.gridRoot (private) via reflection to avoid duplicate wiring
+            var f = typeof(InventoryUI).GetField("gridRoot", BindingFlags.NonPublic | BindingFlags.Instance);
             gridRoot = (RectTransform)f?.GetValue(inventoryUI);
         }
 
         if (!canvas)
             canvas = GetComponentInParent<Canvas>();
+
+        // Try to get EquipmentController from InventoryUI (private field) if not wired
+        if (!equipmentController && inventoryUI != null)
+        {
+            var ef = typeof(InventoryUI).GetField("equipmentController", BindingFlags.NonPublic | BindingFlags.Instance);
+            equipmentController = (EquipmentController)ef?.GetValue(inventoryUI);
+        }
 
         _grid = gridRoot ? gridRoot.GetComponent<GridLayoutGroup>() : null;
         if (!_grid) Debug.LogError("[InventoryDragController] gridRoot must have GridLayoutGroup.");
@@ -85,27 +98,36 @@ public class InventoryDragController : MonoBehaviour
 
         // Candidate cell (grid space)
         if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
-            gridRoot, mouse, canvas.worldCamera, out var localGrid))
+                gridRoot, mouse, canvas.worldCamera, out var localGrid))
             return;
 
         var (cellX, cellY) = LocalToCell(localGrid);
         ClampTopLeftForItem(ref cellX, ref cellY, _pickedItem);
 
-        // Update footprint overlay
+        // Update footprint overlay and cell dimming (we keep the footprint itself hidden)
         var fit = PreviewFootprintAt(cellX, cellY, _pickedItem);
-        _footprintImg.enabled = false;   // ⬅️ keep it invisible
+        _footprintImg.enabled = false;   // keep it invisible
 
         inventoryUI.ClearHighlights();
         Color dim = fit ? new Color(0f, 0f, 0f, 0.5f) : new Color(0.5f, 0f, 0f, 0.5f);
         inventoryUI.HighlightCells(cellX, cellY, _pickedItem.Width, _pickedItem.Height, dim);
 
-        // Place on left-click
+        // Place/equip on left-click release
         if (LeftClickDown())
         {
+            // 1) Try to drop onto an equipment slot under the cursor
+            if (TryEquipViaDropAtCursor())
+            {
+                inventoryUI.ClearHighlights();
+                EndDrag(commit: true);
+                inventoryUI.Refresh();
+                return;
+            }
+
+            // 2) Otherwise, try to place back into the grid
             TryPlace(cellX, cellY);
         }
     }
-
 
     public void OnItemClicked(InventoryItemView view)
     {
@@ -115,21 +137,20 @@ public class InventoryDragController : MonoBehaviour
         }
         else
         {
-            // If already dragging something, clicking another item does nothing (or could swap).
-            // Keep it simple for now.
+            // already dragging: ignore (could implement swap)
         }
     }
+
     private void OnDisable()
     {
         // If the panel disables while dragging, clean up everything.
         if (_dragging)
         {
-            // restore the item to its original place so inventory stays consistent
             CancelDrag();
             return;
         }
 
-        // Even if not dragging, ensure no orphan footprint remains
+        // Ensure no orphan visuals remain
         if (_footprintRect) Destroy(_footprintRect.gameObject);
         _footprintRect = null;
         _footprintImg = null;
@@ -139,10 +160,10 @@ public class InventoryDragController : MonoBehaviour
         _ghostRaw = null;
     }
 
-
     private void BeginDrag(InventoryItemView view)
     {
         if (view == null || view.item == null) return;
+
         // Safety: clear any stale visuals
         if (_footprintRect) { Destroy(_footprintRect.gameObject); _footprintRect = null; _footprintImg = null; }
         if (_ghostRect) { Destroy(_ghostRect.gameObject); _ghostRect = null; _ghostRaw = null; }
@@ -165,14 +186,12 @@ public class InventoryDragController : MonoBehaviour
         // Build footprint overlay under gridRoot
         _footprintRect = CreateFootprint();
         _footprintImg = _footprintRect.GetComponent<Image>();
-        _footprintImg.enabled = false;   // ensure it stays invisible
-
+        _footprintImg.enabled = false; // stay invisible
 
         _dragging = true;
 
-        // Re-render UI without this item occupying cells (dims disappear etc.)
+        // Re-render UI without this item occupying cells
         inventoryUI.Refresh();
-
     }
 
     private void TryPlace(int cellX, int cellY)
@@ -181,7 +200,6 @@ public class InventoryDragController : MonoBehaviour
         _pickedItem.y = cellY;
         inventoryUI.dragHiddenItem = _pickedItem;
 
-
         if (inventory.Data.Place(_pickedItem))
         {
             inventoryUI.ClearHighlights();
@@ -189,11 +207,10 @@ public class InventoryDragController : MonoBehaviour
         }
         else
         {
-            // Thump feedback (brief red flash already shown via overlay)
-            // keep dragging
+            // invalid spot → keep dragging
         }
-        inventoryUI.Refresh();
 
+        inventoryUI.Refresh();
     }
 
     private void CancelDrag()
@@ -226,8 +243,47 @@ public class InventoryDragController : MonoBehaviour
         inventoryUI.Refresh();
     }
 
-    // -------- Helpers --------
+    // ---------- NEW: drop-to-equip ----------
+    private bool TryEquipViaDropAtCursor()
+    {
+        if (equipmentController == null || _pickedView == null || _pickedView.item == null)
+            return false;
 
+        var es = EventSystem.current;
+        if (es == null) return false;
+
+        var ped = new PointerEventData(es)
+        {
+            position = MousePos()
+        };
+
+        var hits = new List<RaycastResult>();
+        es.RaycastAll(ped, hits);
+
+        for (int i = 0; i < hits.Count; i++)
+        {
+            var slotUI = hits[i].gameObject.GetComponentInParent<EquipmentSlotUI>();
+            if (slotUI == null) continue;
+
+            var def = _pickedView.item.def;
+            if (def == null) return false;
+
+            // Try to equip via controller
+            if (equipmentController.TryEquip(def))
+            {
+                // remove from inventory and finish
+                inventory.Remove(_pickedView.item);
+                return true;
+            }
+
+            // found a slot but equip failed (requirements/full etc.)
+            return false;
+        }
+
+        return false; // no slot hit
+    }
+
+    // -------- Helpers --------
     private RectTransform CreateGhost(Texture tex, Vector2 size)
     {
         var go = new GameObject("DragGhost", typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
@@ -239,7 +295,7 @@ public class InventoryDragController : MonoBehaviour
 
         _ghostRaw = go.GetComponent<RawImage>();
         _ghostRaw.texture = tex;
-        _ghostRaw.raycastTarget = false; // don't block clicks
+        _ghostRaw.raycastTarget = false; // don't block UI raycasts
         _ghostRaw.color = new Color(1f, 1f, 1f, 0.9f);
 
         return rt;
@@ -263,13 +319,11 @@ public class InventoryDragController : MonoBehaviour
         img.sprite = footprintSprite;
         img.raycastTarget = false;
 
-        img.enabled = false;   // ⬅️ never render the footprint
-        go.SetActive(false);   // hidden until first position (still fine to keep hidden)
+        img.enabled = false;         // stay invisible
+        go.SetActive(false);         // hidden until first position
 
         return rt;
     }
-
-
 
     private bool PreviewFootprintAt(int cellX, int cellY, InventoryItem it)
     {
@@ -291,7 +345,6 @@ public class InventoryDragController : MonoBehaviour
         _footprintRect.anchoredPosition = new Vector2(px, -py);
         _footprintRect.sizeDelta = new Vector2(wPx, hPx);
 
-        // Ensure it only becomes visible once it's validly placed
         if (!_footprintRect.gameObject.activeSelf)
             _footprintRect.gameObject.SetActive(true);
 
@@ -332,6 +385,7 @@ public class InventoryDragController : MonoBehaviour
         cx = Mathf.Clamp(cx, 0, inventory.Data.width - it.Width);
         cy = Mathf.Clamp(cy, 0, inventory.Data.height - it.Height);
     }
+
     // --- Input System helpers ---
     private static Vector2 MousePos() =>
         Mouse.current != null ? (Vector2)Mouse.current.position.ReadValue() : Vector2.zero;
@@ -344,5 +398,4 @@ public class InventoryDragController : MonoBehaviour
 
     private static bool EscapeDown() =>
         Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame;
-
 }
