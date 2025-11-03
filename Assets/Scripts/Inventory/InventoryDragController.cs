@@ -246,6 +246,8 @@ public class InventoryDragController : MonoBehaviour
     // ---------- NEW: drop-to-equip ----------
     private bool TryEquipViaDropAtCursor()
     {
+        Debug.Log("[Drag] Left click while dragging → trying equip via raycast...");
+
         if (equipmentController == null || _pickedView == null || _pickedView.item == null)
             return false;
 
@@ -264,18 +266,21 @@ public class InventoryDragController : MonoBehaviour
         {
             var slotUI = hits[i].gameObject.GetComponentInParent<EquipmentSlotUI>();
             if (slotUI == null) continue;
+            Debug.Log($"[Drag] Raycast hit slot UI: {slotUI.name} (slot {slotUI.Slot})");
 
             var def = _pickedView.item.def;
-            if (def == null) return false;
+            if (def == null) { Debug.Log("[Drag] Picked view has no definition."); return false; }
+
 
             // Try to equip via controller
             if (equipmentController.TryEquip(def))
             {
+                Debug.Log($"[Drag] Equipped {def.displayName} via drop. Removing from inventory.");
                 // remove from inventory and finish
                 inventory.Remove(_pickedView.item);
                 return true;
             }
-
+            Debug.Log($"[Drag] Equip rejected for {def.displayName} (requirements/slot busy).");
             // found a slot but equip failed (requirements/full etc.)
             return false;
         }

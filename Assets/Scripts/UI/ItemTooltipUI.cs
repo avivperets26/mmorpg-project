@@ -27,6 +27,8 @@ public class ItemTooltipUI : MonoBehaviour
     private CanvasGroup _cg;
     private InventorySlotTooltip _owner;
     private Coroutine _fadeCo;
+    private PlayerStats _playerStatsForTooltip;
+
 
     void Awake()
     {
@@ -65,29 +67,51 @@ public class ItemTooltipUI : MonoBehaviour
     /// <summary>Show & place the tooltip. Safe even when called right after creating slots.</summary>
     public void Show(ItemInstance inst, RectTransform target)
     {
-        if (inst == null || inst.def == null) return;
+        if (inst == null || inst.def == null)
+        {
+            Debug.LogWarning("[ItemTooltipUI] Show called with null instance/definition.");
+            return;
+        }
 
-        transform.SetAsLastSibling();   // render above everything
+        // Cache PlayerStats for Build() so it can color unmet requirements (e.g., Level) in red
+#if UNITY_2023_1_OR_NEWER
+    _playerStatsForTooltip = _playerStatsForTooltip ?? FindFirstObjectByType<PlayerStats>();
+#else
+        _playerStatsForTooltip = _playerStatsForTooltip ?? FindObjectOfType<PlayerStats>();
+#endif
 
-        // Build content first (GO stays active; layout has valid sizes)
+        // Bring tooltip to front so it renders above inventory/equipment slots
+        transform.SetAsLastSibling();
+
+        // Build all visual content (title, rarity, lines, description, etc.)
+        // Inside Build(...), use _playerStatsForTooltip to decide colors for requirement lines:
+        //   bool levelOk = _playerStatsForTooltip && _playerStatsForTooltip.level >= inst.def.requirements.level;
+        //   AddLine($"Level {inst.def.requirements.level}", levelOk ? labelGrey : Color.red);
         Build(inst);
 
-        // Follow target
+        // Follow the provided target (slot / item rect)
         if (anchor && target) anchor.Attach(target);
 
-        // First-pass layout & placement
+        // First-pass layout so rects have valid sizes before anchoring
         var rt = (RectTransform)transform;
         Canvas.ForceUpdateCanvases();
         LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
+
+        // Place the tooltip now (uses current rect sizes)
         anchor?.RepositionNow();
 
-        // Ensure we are visible (fade to 1)
+        // Ensure visible (fade in)
         StartFade(1f);
 
-        // Second-pass placement (after TMP/Layout settle at end of frame)
-        var eof = PlaceAfterLayout();
+        // Second pass: after TMP/layout settle at end of frame, place again to avoid jitter
+        System.Collections.IEnumerator eof = PlaceAfterLayout();
         if (isActiveAndEnabled) StartCoroutine(eof);
         else UiCoroutineRunner.Run(eof);
+
+        // Debug trace to help follow the flow while you test
+        Debug.Log($"[ItemTooltipUI] Show → '{inst.def.displayName}', " +
+                  $"Req.Level={inst.def.requirements.level}, " +
+                  $"PlayerLvl={_playerStatsForTooltip?.level.ToString() ?? "n/a"}");
     }
 
     public void Hide()
@@ -233,7 +257,13 @@ public class ItemTooltipUI : MonoBehaviour
         }
 
         // ----- REQS + TYPE -----
-        AddLine(StatLine("Required Level", $"{def.requirements.level}"));
+        bool hasStats = _playerStatsForTooltip != null;
+        bool levelOk = !hasStats || _playerStatsForTooltip.level >= def.requirements.level;
+
+        var reqLevel = AddLine(StatLine("Required Level", $"{def.requirements.level}"));
+        // whole line red if unmet
+        reqLevel.color = levelOk ? new Color(0.85f, 0.85f, 0.85f) : Color.red;
+
         AddLine(StatLine("Type", EquipTypeLabel(def)));
         AddSeparator(height: 10f, alpha: 0f);
 
