@@ -17,7 +17,7 @@ public class PlayerStats : MonoBehaviour
     public int equipMagicResist;
     public int equipDamageMin;
     public int equipDamageMax;
-    public float equipWizardry;      // for magic builds (if you use it)
+    public float equipWizardry;
     public float equipHpOnKill;
     public float equipManaOnKill;
 
@@ -25,11 +25,11 @@ public class PlayerStats : MonoBehaviour
     [Header("Core Attributes")]
     public int strength = 5;
     public int dexterity = 5;
-    public int vitality = 5;   // NEW
+    public int vitality = 5;
     public int energy = 5;
 
     [Tooltip("Unspent points you can distribute.")]
-    public int availableStatPoints = 10; // start with 10 so it’s easy to test
+    public int availableStatPoints = 10;
 
     [Header("Progression")]
     public int level = 1;
@@ -66,7 +66,6 @@ public class PlayerStats : MonoBehaviour
         equipDamageMin += Mathf.Max(0, dmg.min);
         equipDamageMax += Mathf.Max(0, dmg.max);
         equipWizardry += Mathf.Max(0, dmg.wizardry);
-        // crit/speed can be handled elsewhere if needed
     }
     public void RemoveWeapon(DamageProfile dmg)
     {
@@ -100,10 +99,7 @@ public class PlayerStats : MonoBehaviour
         availableStatPoints++;
     }
 
-    /// <summary>
-    /// Apply pending deltas from the Character Stats dialog.
-    /// Clamp to non-negative increments to keep it simple/safe.
-    /// </summary>
+    /// <summary>Legacy support if you ever need to apply deltas again.</summary>
     public void ApplyDelta(int dStr, int dDex, int dVit, int dEng)
     {
         strength += Mathf.Max(0, dStr);

@@ -9,7 +9,7 @@ public class StatAllocationUI : MonoBehaviour
 {
     [Header("Wiring")]
     [SerializeField] private PlayerStats playerStats;
-    [SerializeField] private GameObject rootPanel; // the whole dialog root (CharacterStatPanel)
+    [SerializeField] private GameObject rootPanel; // CharacterStatPanel
 
     [Header("Available Points")]
     [SerializeField] private TMP_Text availablePointsText;
@@ -17,29 +17,23 @@ public class StatAllocationUI : MonoBehaviour
     [System.Serializable]
     public class StatRow
     {
-        public string statName;     // e.g., "Strength"
-        public TMP_Text nameLabel;    // left label
-        public Button minusBtn;     // –
-        public TMP_Text valueText;    // big number in the middle
-        public Button plusBtn;      // +
-        public TMP_Text detailsText;  // MU-like details block under the row
+        public string statName;     // "Strength", "Vitality", ...
+        public TMP_Text nameAndValueLabel; // merged: "Strength: 12"
+        public Button plusBtn;      // [+] only
+        public TMP_Text detailsText;// multi-line details under the row
     }
 
-    [Header("Rows")]
+    [Header("Rows (order = UI order)")]
     [SerializeField] private StatRow strengthRow;
-    [SerializeField] private StatRow dexterityRow;
     [SerializeField] private StatRow vitalityRow;
+    [SerializeField] private StatRow dexterityRow;
     [SerializeField] private StatRow energyRow;
-
-    [Header("Footer")]
-    [SerializeField] private Button applyButton;
-    [SerializeField] private Button cancelButton;
 
     [Header("Polish / Fade")]
     [Tooltip("Seconds for open/close fade.")]
     [SerializeField] private float fadeDuration = 0.12f;
 
-    // ---- Base numbers kept locally so we don't depend on PlayerStats members ----
+    // ---- Local tunables (no hard dependency on PlayerStats internals) ----
     [Header("Base numbers (can be tuned in Inspector)")]
     [Tooltip("Physical weapon base min/max")]
     [SerializeField] private int fallbackWeaponBaseMin = 0;
@@ -55,38 +49,24 @@ public class StatAllocationUI : MonoBehaviour
     [Tooltip("Total magic resistance from equipped items")]
     [SerializeField] private int fallbackEquipMagicRes = 0;
 
-    // pending deltas (not yet applied to PlayerStats)
-    private int _dStr, _dDex, _dVit, _dEng;
-
-    // fade helpers
+    // Fade helpers
     private CanvasGroup _cg;
     private Coroutine _fadeCo;
+
+    private const string DimOpen = "<color=#FFFFFF99>"; // ~60% opacity
+    private const string DimClose = "</color>";
+
+    private static string Dim(string t) => $"{DimOpen}{t}{DimClose}";
 
     // ---------- Unity ----------
 
     private void Awake()
     {
-        // Wire rows
-        WireRow(strengthRow, OnMinusStrength, OnPlusStrength, "Strength");
-        WireRow(dexterityRow, OnMinusDexterity, OnPlusDexterity, "Dexterity");
-        WireRow(vitalityRow, OnMinusVitality, OnPlusVitality, "Vitality");
-        WireRow(energyRow, OnMinusEnergy, OnPlusEnergy, "Energy");
-
-        // Footer buttons
-        if (applyButton) applyButton.onClick.AddListener(Apply);
-        if (cancelButton) cancelButton.onClick.AddListener(CancelAndCloseUI); // <-- fixed
-
-        // PlayerStats fallback
-        if (!playerStats)
-        {
 #if UNITY_2023_1_OR_NEWER
-            playerStats = FindFirstObjectByType<PlayerStats>();
+        if (!playerStats) playerStats = FindFirstObjectByType<PlayerStats>();
 #else
-            playerStats = FindObjectOfType<PlayerStats>();
+        if (!playerStats) playerStats = FindObjectOfType<PlayerStats>();
 #endif
-        }
-
-        // CanvasGroup for fade (on the root panel)
         if (rootPanel)
         {
             _cg = rootPanel.GetComponent<CanvasGroup>();
@@ -95,11 +75,36 @@ public class StatAllocationUI : MonoBehaviour
             _cg.interactable = false;
             _cg.blocksRaycasts = false;
         }
+
+        // Wire rows (plus only) and set fallback names
+        WireRow(strengthRow, OnPlusStrength, "Strength");
+        WireRow(vitalityRow, OnPlusVitality, "Vitality");
+        WireRow(dexterityRow, OnPlusDexterity, "Dexterity");
+        WireRow(energyRow, OnPlusEnergy, "Energy");
+
+        // Ensure details TMPs render rich text (for <alpha=...>)
+        EnsureRichText(strengthRow?.detailsText);
+        EnsureRichText(vitalityRow?.detailsText);
+        EnsureRichText(dexterityRow?.detailsText);
+        EnsureRichText(energyRow?.detailsText);
+
+        // (Optional) Also allow rich text on the merged label (harmless)
+        EnsureRichText(strengthRow?.nameAndValueLabel);
+        EnsureRichText(vitalityRow?.nameAndValueLabel);
+        EnsureRichText(dexterityRow?.nameAndValueLabel);
+        EnsureRichText(energyRow?.nameAndValueLabel);
+    }
+
+    private static void EnsureRichText(TMP_Text t)
+    {
+        if (!t) return;
+        t.richText = true;                     // fixes </alpha> showing
+        t.enableWordWrapping = true;
+        t.overflowMode = TextOverflowModes.Overflow;
     }
 
     private void OnEnable()
     {
-        ResetPending();
         RefreshAll();
     }
 
@@ -112,7 +117,6 @@ public class StatAllocationUI : MonoBehaviour
         rootPanel.transform.SetAsLastSibling(); // on top
         rootPanel.SetActive(true);
 
-        ResetPending();
         RefreshAll();
         StartFade(1f, fadeDuration, enableInteractionAtEnd: true);
     }
@@ -127,13 +131,8 @@ public class StatAllocationUI : MonoBehaviour
         });
     }
 
-    public void CancelAndCloseUI()
-    {
-        Cancel();   // refunds pending deltas
-        Close();    // fades out
-    }
-
-    public void OnPressClose() => CancelAndCloseUI();
+    public void CancelAndCloseUI() => Close(); // points are final now
+    public void OnPressClose() => Close();
 
     // ---------- Internal: Fade ----------
 
@@ -176,76 +175,34 @@ public class StatAllocationUI : MonoBehaviour
 
     // ---------- Row wiring ----------
 
-    private void WireRow(StatRow row, UnityEngine.Events.UnityAction onMinus, UnityEngine.Events.UnityAction onPlus, string label)
+    private void WireRow(StatRow row, UnityEngine.Events.UnityAction onPlus, string fallbackName)
     {
         if (row == null) return;
-        if (row.nameLabel) row.nameLabel.text = string.IsNullOrWhiteSpace(row.statName) ? label : row.statName;
-        if (row.minusBtn) row.minusBtn.onClick.AddListener(onMinus);
-        if (row.plusBtn) row.plusBtn.onClick.AddListener(onPlus);
+
+        if (string.IsNullOrWhiteSpace(row.statName))
+            row.statName = fallbackName;
+
+        if (row.plusBtn)
+            row.plusBtn.onClick.AddListener(onPlus);
     }
 
-    // ---------- Button callbacks per stat ----------
+    // ---------- [+] callbacks — immediate & permanent ----------
 
-    private void OnPlusStrength() { TryAdd(ref _dStr); }
-    private void OnPlusDexterity() { TryAdd(ref _dDex); }
-    private void OnPlusVitality() { TryAdd(ref _dVit); }
-    private void OnPlusEnergy() { TryAdd(ref _dEng); }
+    private void OnPlusStrength() { TrySpendAndAdd(ref playerStats.strength); }
+    private void OnPlusDexterity() { TrySpendAndAdd(ref playerStats.dexterity); }
+    private void OnPlusVitality() { TrySpendAndAdd(ref playerStats.vitality); }
+    private void OnPlusEnergy() { TrySpendAndAdd(ref playerStats.energy); }
 
-    private void OnMinusStrength() { TryRemove(ref _dStr); }
-    private void OnMinusDexterity() { TryRemove(ref _dDex); }
-    private void OnMinusVitality() { TryRemove(ref _dVit); }
-    private void OnMinusEnergy() { TryRemove(ref _dEng); }
-
-    // ---------- Core add/remove logic ----------
-
-    private void TryAdd(ref int delta)
+    private void TrySpendAndAdd(ref int statField)
     {
         if (!playerStats) return;
         if (playerStats.availableStatPoints <= 0) return;
 
         if (playerStats.TrySpendPoint())
         {
-            delta++;
-            RefreshAll();
+            statField++;         // apply immediately (final)
+            RefreshAll();        // rebuild numbers/details
         }
-    }
-
-    private void TryRemove(ref int delta)
-    {
-        if (!playerStats) return;
-        if (delta <= 0) return;
-
-        delta--;
-        playerStats.RefundPoint();
-        RefreshAll();
-    }
-
-    // ---------- Apply / Cancel ----------
-
-    private void Apply()
-    {
-        if (!playerStats) return;
-        if (_dStr == 0 && _dDex == 0 && _dVit == 0 && _dEng == 0) return;
-
-        playerStats.ApplyDelta(_dStr, _dDex, _dVit, _dEng);
-        ResetPending();
-        RefreshAll();
-    }
-
-    private void Cancel()
-    {
-        if (!playerStats) return;
-
-        int totalPending = _dStr + _dDex + _dVit + _dEng;
-        playerStats.availableStatPoints += totalPending;
-
-        ResetPending();
-        RefreshAll();
-    }
-
-    private void ResetPending()
-    {
-        _dStr = _dDex = _dVit = _dEng = 0;
     }
 
     // ---------- UI refresh ----------
@@ -257,58 +214,43 @@ public class StatAllocationUI : MonoBehaviour
         if (availablePointsText)
             availablePointsText.text = $"Points Available: {playerStats.availableStatPoints}";
 
-        // Update numbers + details per row
-        RefreshRow(strengthRow, playerStats.strength, _dStr, BuildDetailsForStrength());
-        RefreshRow(dexterityRow, playerStats.dexterity, _dDex, BuildDetailsForDexterity());
-        RefreshRow(vitalityRow, playerStats.vitality, _dVit, BuildDetailsForVitality());
-        RefreshRow(energyRow, playerStats.energy, _dEng, BuildDetailsForEnergy());
+        // Order: Strength, Vitality, Dexterity, Energy (as requested)
+        RefreshRow(strengthRow, playerStats.strength, BuildDetailsForStrength());
+        RefreshRow(vitalityRow, playerStats.vitality, BuildDetailsForVitality());
+        RefreshRow(dexterityRow, playerStats.dexterity, BuildDetailsForDexterity());
+        RefreshRow(energyRow, playerStats.energy, BuildDetailsForEnergy());
 
-        // Footer buttons
-        int pending = _dStr + _dDex + _dVit + _dEng;
-        if (applyButton) applyButton.interactable = pending > 0;
-        if (cancelButton) cancelButton.interactable = pending > 0;
-
-        // Show/hide +/– per rules
+        // Hide [+] entirely when you can't add
         bool canAdd = playerStats.availableStatPoints > 0;
-        SetRowAddRemoveState(strengthRow, canAdd, _dStr);
-        SetRowAddRemoveState(dexterityRow, canAdd, _dDex);
-        SetRowAddRemoveState(vitalityRow, canAdd, _dVit);
-        SetRowAddRemoveState(energyRow, canAdd, _dEng);
+        SetPlusState(strengthRow, canAdd);
+        SetPlusState(vitalityRow, canAdd);
+        SetPlusState(dexterityRow, canAdd);
+        SetPlusState(energyRow, canAdd);
     }
 
-    private void RefreshRow(StatRow row, int baseValue, int delta, string details)
+    private void RefreshRow(StatRow row, int value, string details)
     {
         if (row == null) return;
 
-        int shown = baseValue + delta;
-        if (row.valueText) row.valueText.text = shown.ToString();
-        if (row.detailsText) row.detailsText.text = details;
+        if (row.nameAndValueLabel)
+            row.nameAndValueLabel.text = $"{row.statName}: {value}";
+
+        if (row.detailsText)
+            row.detailsText.text = details;
     }
 
-    // Shows/hides +/– per row, and keeps interactable states in sync.
-    private void SetRowAddRemoveState(StatRow row, bool canAdd, int delta)
+    private void SetPlusState(StatRow row, bool canAdd)
     {
-        if (row == null) return;
-
-        if (row.plusBtn)
-        {
-            row.plusBtn.interactable = canAdd;
-            row.plusBtn.gameObject.SetActive(canAdd);
-        }
-
-        bool canRemove = delta > 0;
-        if (row.minusBtn)
-        {
-            row.minusBtn.interactable = canRemove;
-            row.minusBtn.gameObject.SetActive(canRemove);
-        }
+        if (row?.plusBtn == null) return;
+        row.plusBtn.interactable = canAdd;
+        row.plusBtn.gameObject.SetActive(canAdd); // ← HIDE when no points
     }
 
-    // ---------- Calculations for details ----------
+    // ---------- Calculations for details (your terminology) ----------
 
     private int Level => playerStats != null ? playerStats.level : 1;
 
-    // Use local fallbacks so there is no dependency on PlayerStats members.
+    // Local fallbacks (keep UI free of hard PlayerStats dependencies)
     private int WeaponBaseMin => fallbackWeaponBaseMin;
     private int WeaponBaseMax => fallbackWeaponBaseMax;
     private int StaffBaseMin => fallbackStaffBaseMin;
@@ -316,70 +258,75 @@ public class StatAllocationUI : MonoBehaviour
     private int EquipDefense => fallbackEquipDefense;
     private int EquipMRes => fallbackEquipMagicRes;
 
-    private int CurrentStrength => (playerStats?.strength ?? 0) + _dStr;
-    private int CurrentDex => (playerStats?.dexterity ?? 0) + _dDex;
-    private int CurrentVit => (playerStats?.vitality ?? 0) + _dVit;
-    private int CurrentInt => (playerStats?.energy ?? 0) + _dEng;
+    private int STR => playerStats ? playerStats.strength : 0;
+    private int DEX => playerStats ? playerStats.dexterity : 0;
+    private int VIT => playerStats ? playerStats.vitality : 0;
+    private int ENG => playerStats ? playerStats.energy : 0;
 
+    // --- Strength ---
+    // Physical Attack [min - max]
+    // Attack Success Rate [min - max]
+    // Critical Chance [min - max]
     private string BuildDetailsForStrength()
     {
-        int str = CurrentStrength;
-        int dex = CurrentDex;
-
-        int minPhys = WeaponBaseMin + 2 * str;
-        int maxPhys = WeaponBaseMax + 2 * str;
-        float atkSpd = 100f + 0.5f * dex; // (optionally show only under DEX)
-
-        return
-            $"<alpha=#99>Physical Attack</alpha>: {minPhys}–{maxPhys}\n" +
-            $"<alpha=#99>Attack Speed</alpha>: {atkSpd:0}";
-    }
-
-    private string BuildDetailsForDexterity()
-    {
-        int dex = CurrentDex;
-        int hit = 100 + 2 * Level + 5 * dex;
-        float crt = 5f + 0.2f * dex;
-        float eva = 0.15f * dex;
+        int physMin = WeaponBaseMin + 2 * STR;
+        int physMax = WeaponBaseMax + 2 * STR;
+        int hitMin = 80 + 1 * Level + 3 * STR;
+        int hitMax = 120 + 3 * Level + 6 * STR;
+        float critMin = 2f + 0.10f * STR;
+        float critMax = 5f + 0.25f * STR;
 
         return
-            $"<alpha=#99>Attack Success</alpha>: {hit}\n" +
-            $"<alpha=#99>Critical Chance</alpha>: {crt:0.0}%\n" +
-            $"<alpha=#99>Evasion</alpha>: {eva:0.0}%";
+            $"{Dim("Physical Attack")}: {physMin}–{physMax}\n" +
+            $"{Dim("Attack Success Rate")}: {hitMin}–{hitMax}\n" +
+            $"{Dim("Critical Chance")}: {critMin:0.0}%–{critMax:0.0}%";
     }
-
+    // --- Vitality ---
+    // Max Health Point, Max Health Regeneration, Immunity rate (non-magic)
     private string BuildDetailsForVitality()
     {
-        int vit = CurrentVit;
-        int dex = CurrentDex;
-
-        int hp = 100 + 10 * Level + 20 * vit;
-        int def = EquipDefense + vit + Mathf.FloorToInt(0.5f * dex);
-        float h5 = 1f + 0.5f * vit;
-        int sp = 100 + 5 * vit + 2 * dex;
-        float s5 = 1f + 0.2f * vit;
+        int maxHP = 100 + 10 * Level + 20 * VIT;
+        float hp5 = 1f + 0.5f * VIT;
+        float immunity = Mathf.Clamp01(0.004f * VIT + 0.001f * Mathf.Max(0, EquipDefense)) * 100f;
 
         return
-            $"<alpha=#99>Max HP</alpha>: {hp}\n" +
-            $"<alpha=#99>Defense</alpha>: {def}\n" +
-            $"<alpha=#99>HP Regen/5s</alpha>: {h5:0.0}\n" +
-            $"<alpha=#99>Stamina</alpha>: {sp}  <alpha=#99>(+{s5:0.0}/5s)</alpha>";
+            $"{Dim("Max HP")}: {maxHP}\n" +
+            $"{Dim("HP Regen/5s")}: {hp5:0.0}\n" +
+            $"{Dim("Immunity Rate")}: {immunity:0.0}%";
     }
 
-    private string BuildDetailsForEnergy()
+    // --- Dexterity ---
+    // Attack Speed, Armor, Evasion rate
+    private string BuildDetailsForDexterity()
     {
-        int intel = CurrentInt;
-
-        int mp = 50 + 5 * Level + 15 * intel;
-        int matkMin = StaffBaseMin + 3 * intel;
-        int matkMax = StaffBaseMax + 3 * intel;
-        float m5 = 1f + 0.4f * intel;
-        int mres = EquipMRes + intel;
+        float atkSpd = 100f + 0.8f * DEX;
+        int armor = EquipDefense + Mathf.FloorToInt(0.4f * DEX);
+        float evasion = 0.20f * DEX;
 
         return
-            $"<alpha=#99>Max MP</alpha>: {mp}\n" +
-            $"<alpha=#99>Magic Attack</alpha>: {matkMin}–{matkMax}\n" +
-            $"<alpha=#99>MP Regen/5s</alpha>: {m5:0.0}\n" +
-            $"<alpha=#99>Magic Resist</alpha>: {mres}";
+            $"{Dim("Attack Speed")}: {atkSpd:0}\n" +
+            $"{Dim("Armor")}: {armor}\n" +
+            $"{Dim("Evasion Rate")}: {evasion:0.0}%";
+    }
+
+    // --- Energy ---
+    // Max Mana Point, Magic Attack [min-max], Magic critical [min-max], Mana Regeneration, Magic Resistance
+    private string BuildDetailsForEnergy()
+    {
+        int maxMP = 50 + 5 * Level + 15 * ENG;
+        int mMin = StaffBaseMin + 3 * ENG;
+        int mMax = StaffBaseMax + 3 * ENG;
+        const float critMult = 1.5f;
+        int mcMin = Mathf.RoundToInt(mMin * critMult);
+        int mcMax = Mathf.RoundToInt(mMax * critMult);
+        float mp5 = 1f + 0.4f * ENG;
+        int mRes = EquipMRes + ENG;
+
+        return
+            $"{Dim("Max MP")}: {maxMP}\n" +
+            $"{Dim("Magic Attack")}: {mMin}–{mMax}\n" +
+            $"{Dim("Magic Critical")}: {mcMin}–{mcMax}\n" +
+            $"{Dim("MP Regen/5s")}: {mp5:0.0}\n" +
+            $"{Dim("Magic Resist")}: {mRes}";
     }
 }
