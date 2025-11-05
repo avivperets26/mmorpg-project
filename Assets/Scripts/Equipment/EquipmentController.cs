@@ -1,13 +1,16 @@
+// Assets/Scripts/Equipment/EquipmentController.cs
 using System.Collections.Generic;
+using System.Linq;            // for ToArray in RefreshUI()
 using UnityEngine;
+using UnityEngine.UI;
 using Game.Items;
 
 public class EquipmentController : MonoBehaviour
 {
     [Header("Wiring")]
-    [SerializeField] private PlayerInventory inventory;       // optional (for remove/add)
-    [SerializeField] private PlayerStats playerStats;          // for requirements
-    [SerializeField] private CharacterPreviewController preview;// optional (to refresh look)
+    [SerializeField] private PlayerInventory inventory;
+    [SerializeField] private PlayerStats playerStats;
+    [SerializeField] private CharacterPreviewController preview;
 
     [Header("UI Slots")]
     [SerializeField] private EquipmentSlotUI helm;
@@ -24,11 +27,11 @@ public class EquipmentController : MonoBehaviour
     [SerializeField] private EquipmentSlotUI rightHand;
     [SerializeField] private EquipmentSlotUI leftHand;
 
+    // Current equipped state
     private readonly Dictionary<EquipmentSlot, ItemDefinition> _equipped = new();
 
     private void Awake()
     {
-        // Init slot UIs → so they know their logical slot + controller
         InitSlot(EquipmentSlot.Helm, helm, "Helm");
         InitSlot(EquipmentSlot.Gloves, gloves, "Gloves");
         InitSlot(EquipmentSlot.Armor, armor, "Armor");
@@ -44,6 +47,12 @@ public class EquipmentController : MonoBehaviour
         InitSlot(EquipmentSlot.LeftHand, leftHand, "LeftHand");
     }
 
+    private void OnEnable()
+    {
+        // If UI elements were rebuilt while disabled, this re-applies the visuals.
+        RefreshUI();
+    }
+
     private void InitSlot(EquipmentSlot slot, EquipmentSlotUI ui, string label)
     {
         if (!ui) return;
@@ -52,48 +61,114 @@ public class EquipmentController : MonoBehaviour
         _equipped[slot] = null;
     }
 
-    // ---------- Public API ----------
-    public bool TryEquip(ItemDefinition def)
+    // =====================================================================
+    // Public API (generic auto-slot)
+    // =====================================================================
+    public bool TryEquip(ItemDefinition def, bool fromInventory = false)
     {
         if (def == null) return false;
 
-        // Map item → primary slot (e.g., Sword → RightHand/LeftHand, Helmet → Helm)
+        Debug.Log($"[Equip] TryEquip def='{def.displayName}', fromInventory={fromInventory}, frame={Time.frameCount}");
+
         if (!EquipmentSlotMapper.TrySuggestSlot(def, out var primary, out var secondary))
         {
             Debug.Log($"[Equip] No slot mapping for {def.displayName} ({def.subtype})");
             return false;
         }
 
-        // Requirements check
         if (!MeetsRequirements(def, out var reason))
         {
             Debug.Log($"[Equip] FAIL requirements for {def.displayName}: {reason}");
+            HighlightInvalidSlot(def);
             return false;
         }
 
-        // If two-handed, clear both hands first
+        // Two-handed → clear both, then use RightHand as the actual owner
         if (def.grip == WeaponGrip.TwoHanded)
         {
             TryUnequip(EquipmentSlot.RightHand);
             TryUnequip(EquipmentSlot.LeftHand);
+            return EquipIntoSlot(EquipmentSlot.RightHand, def);
         }
 
-        // Choose a free hand for 1H weapons
+        // One-handed weapon → prefer a free hand
         if (primary is EquipmentSlot.RightHand or EquipmentSlot.LeftHand)
         {
             var target = ChooseHandForOneHander(primary);
             return EquipIntoSlot(target, def);
         }
 
-        // Armor / accessories into their exact slot
         return EquipIntoSlot(primary, def);
     }
 
+    // =====================================================================
+    // Public API (explicit slot – used by drag & hover)
+    // =====================================================================
+    public bool TryEquipInto(EquipmentSlot targetSlot, ItemDefinition def, bool fromInventory = false)
+    {
+        if (def == null) return false;
+
+        Debug.Log($"[Equip] TryEquipInto slot={targetSlot}, def='{def.displayName}', fromInventory={fromInventory}, frame={Time.frameCount}");
+
+        if (!PreviewCanEquip(def, targetSlot, out var reason))
+        {
+            Debug.Log($"[Equip] Cannot equip {def.displayName} into {targetSlot}: {reason}");
+            return false;
+        }
+
+        // If it's a two-hander dropped on either hand, clear both and use RightHand.
+        if (def.grip == WeaponGrip.TwoHanded &&
+            (targetSlot == EquipmentSlot.LeftHand || targetSlot == EquipmentSlot.RightHand))
+        {
+            TryUnequip(EquipmentSlot.RightHand);
+            TryUnequip(EquipmentSlot.LeftHand);
+            return EquipIntoSlot(EquipmentSlot.RightHand, def);
+        }
+
+        return EquipIntoSlot(targetSlot, def);
+    }
+
+    /// <summary>For hover UI: tells if item would equip into a specific slot and why/why not.</summary>
+    public bool PreviewCanEquip(ItemDefinition def, EquipmentSlot targetSlot, out string reason)
+    {
+        reason = "";
+
+        if (!EquipmentSlotMapper.TrySuggestSlot(def, out var primary, out var secondary))
+        {
+            reason = "No slot mapping";
+            return false;
+        }
+
+        // slot compatibility
+        bool slotOk =
+            targetSlot == primary ||
+            (secondary != default && targetSlot == secondary) ||
+            (def.grip == WeaponGrip.TwoHanded && (targetSlot == EquipmentSlot.RightHand || targetSlot == EquipmentSlot.LeftHand));
+
+        if (!slotOk)
+        {
+            reason = $"Wrong slot ({targetSlot})";
+            return false;
+        }
+
+        // requirements
+        if (!MeetsRequirements(def, out reason))
+            return false;
+
+        return true;
+    }
+
+    // =====================================================================
+    // Unequip
+    // =====================================================================
     public bool TryUnequip(EquipmentSlot slot)
     {
-        if (!_equipped.TryGetValue(slot, out var def) || def == null) return false;
+        Debug.Log($"[Equip] TryUnequip CALLED for {slot} (frame={Time.frameCount}). " +
+                  $"LastEquipDropFrame={InventoryDragController.LastEquipDropFrame}, IsDragging={InventoryDragController.IsDragging}");
 
-        // Return to inventory if possible
+        if (!_equipped.TryGetValue(slot, out var def) || def == null)
+            return false;
+
         if (inventory && !inventory.TryAdd(def))
         {
             Debug.Log($"[Equip] Could not return {def.displayName} to inventory (no space).");
@@ -102,26 +177,62 @@ public class EquipmentController : MonoBehaviour
 
         ApplyStatsOnUnequip(def);
         _equipped[slot] = null;
+
+        // Update just that slot immediately
         GetUI(slot)?.ShowItem(null);
+
         Debug.Log($"[Equip] Unequipped {def.displayName} from {slot}.");
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
+
+        // Defensive repaint in case any UI rebuilt this frame
+        RefreshUI();
         return true;
     }
 
-    // ---------- Internals ----------
+    // =====================================================================
+    // Internals
+    // =====================================================================
     private bool EquipIntoSlot(EquipmentSlot slot, ItemDefinition def)
     {
         var current = _equipped.TryGetValue(slot, out var c) ? c : null;
         if (current != null) TryUnequip(slot);
 
         _equipped[slot] = def;
+
+        // Update the specific slot immediately
         GetUI(slot)?.ShowItem(def);
+
         ApplyStatsOnEquip(def);
 
-        Debug.Log($"[Equip] Equipped {def.displayName} into {slot}.");
+        Debug.Log($"[Equip] Equipped {def.displayName} into {slot} (frame={Time.frameCount}).");
+
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
+
+        // If any UI elements were rebuilt during the drag/drop, make sure all slot UIs match state.
+        RefreshUI();
+        DumpEquipped();
         return true;
+    }
+
+    /// <summary>Re-applies current equipped data to all slot UIs (safe after any UI rebuild).</summary>
+    public void RefreshUI()
+    {
+        foreach (var kv in _equipped.ToArray())
+        {
+            var ui = GetUI(kv.Key);
+            if (ui) ui.ShowItem(kv.Value);
+        }
+#if UNITY_EDITOR
+        Debug.Log($"[Equip] RefreshUI repaint complete (frame={Time.frameCount}).");
+#endif
+    }
+
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    private void DumpEquipped()
+    {
+        foreach (var kv in _equipped)
+            Debug.Log($"[Equip] SLOT {kv.Key} = {(kv.Value != null ? kv.Value.displayName : "NULL")}");
     }
 
     private EquipmentSlotUI GetUI(EquipmentSlot slot) => slot switch
@@ -144,54 +255,64 @@ public class EquipmentController : MonoBehaviour
 
     private EquipmentSlot ChooseHandForOneHander(EquipmentSlot suggested)
     {
-        // prefer RightHand unless occupied
         bool rightFree = !_equipped.TryGetValue(EquipmentSlot.RightHand, out var r) || r == null;
         bool leftFree = !_equipped.TryGetValue(EquipmentSlot.LeftHand, out var l) || l == null;
 
         if (rightFree) return EquipmentSlot.RightHand;
         if (leftFree) return EquipmentSlot.LeftHand;
-
-        // both busy → replace suggested
-        return suggested;
+        return suggested; // replace suggested if both busy
     }
 
     private bool MeetsRequirements(ItemDefinition def, out string reason)
     {
         reason = "";
-        if (!playerStats) return true; // no stats component → allow
+        if (!playerStats) return true;
 
         // Level
-        int playerLevel = playerStats.level;               // add ‘level’ to PlayerStats (see C below)
-        if (playerLevel < def.requirements.level)
+        if (playerStats.level < def.requirements.level)
         {
             reason = $"Level {def.requirements.level} required";
             return false;
         }
 
-        // Class flags (optional – enable if you use classes)
-        // if ((def.requirements.usableBy & playerStats.classFlags) == 0) { ... }
-
-        // Basic stats (if you’re tracking them)
-        // if (playerStats.str < def.requirements.minStrength) { ... }
-
+        // TODO: add STR/DEX/etc checks if/when you have them.
         return true;
     }
 
+    // -------- Visual: brief red flash used when generic equip fails --------
+    private void HighlightInvalidSlot(ItemDefinition def)
+    {
+        if (!EquipmentSlotMapper.TrySuggestSlot(def, out var primary, out _)) return;
+        var ui = GetUI(primary);
+        if (!ui) return;
+
+        var img = ui.GetComponent<Image>();
+        if (!img) return;
+
+        Color orig = img.color;
+        img.color = new Color(1f, 0f, 0f, 0.35f);
+        StartCoroutine(RestoreSlotColor(img, orig, 0.35f));
+    }
+
+    private System.Collections.IEnumerator RestoreSlotColor(Image img, Color orig, float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        if (img) img.color = orig;
+    }
+
+    // -------- Stat aggregation --------
     private void ApplyStatsOnEquip(ItemDefinition def)
     {
         if (!playerStats) return;
 
-        // weapons
         if (def.category == ItemCategory.Weapon) playerStats.AddWeapon(def.baseDamage);
 
-        // armor/helm/boots etc.
         if (def.category == ItemCategory.Armor)
         {
             playerStats.AddArmor(def.baseDefense, def.baseMagicResist);
             playerStats.AddOnKill(def.hpOnKill, def.manaOnKill);
         }
 
-        // boots movement (optional)
         if (def.subtype == ItemSubtype.Boots) playerStats.EquipBoots(1.2f);
     }
 
@@ -209,4 +330,77 @@ public class EquipmentController : MonoBehaviour
 
         if (def.subtype == ItemSubtype.Boots) playerStats.UnequipBoots();
     }
+
+
+    public ItemDefinition GetEquipped(EquipmentSlot slot)
+    {
+        return _equipped.TryGetValue(slot, out var d) ? d : null;
+    }
+
+    /// <summary>Move the equipped item from one slot to another without passing through the inventory.</summary>
+    public bool MoveEquip(EquipmentSlot from, EquipmentSlot to)
+    {
+        if (from == to) return true;
+
+        var def = GetEquipped(from);
+        if (def == null) return false;
+
+        if (!PreviewCanEquip(def, to, out var reason))
+        {
+            Debug.Log($"[Equip] MoveEquip FAIL {from}->{to}: {reason}");
+            return false;
+        }
+
+        // Two-handers always end up in RightHand; clear both hands first
+        if (def.grip == WeaponGrip.TwoHanded &&
+            (to == EquipmentSlot.LeftHand || to == EquipmentSlot.RightHand))
+        {
+            to = EquipmentSlot.RightHand;
+            _equipped[EquipmentSlot.LeftHand] = null;
+            _equipped[EquipmentSlot.RightHand] = def;
+            GetUI(EquipmentSlot.LeftHand)?.ShowItem(null);
+            GetUI(EquipmentSlot.RightHand)?.ShowItem(def);
+        }
+        else
+        {
+            // If target occupied, unequip it to inventory (optional policy)
+            if (_equipped.TryGetValue(to, out var existing) && existing != null)
+                TryUnequip(to);
+
+            _equipped[from] = null;
+            _equipped[to] = def;
+
+            GetUI(from)?.ShowItem(null);
+            GetUI(to)?.ShowItem(def);
+        }
+
+        if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
+        RefreshUI();
+        DumpEquipped();
+        return true;
+    }
+    // ----------------------------------------------------------------------
+    // Public accessor for external scripts (like InventoryDragController)
+    // ----------------------------------------------------------------------
+    public EquipmentSlotUI GetSlotUI(EquipmentSlot slot)
+    {
+        return slot switch
+        {
+            EquipmentSlot.Helm => helm,
+            EquipmentSlot.Gloves => gloves,
+            EquipmentSlot.Armor => armor,
+            EquipmentSlot.Pants => pants,
+            EquipmentSlot.Boots => boots,
+            EquipmentSlot.Amulet => amulet,
+            EquipmentSlot.Ring1 => ring1,
+            EquipmentSlot.Ring2 => ring2,
+            EquipmentSlot.Pet => pet,
+            EquipmentSlot.Orb => orb,
+            EquipmentSlot.Wings => wings,
+            EquipmentSlot.RightHand => rightHand,
+            EquipmentSlot.LeftHand => leftHand,
+            _ => null
+        };
+    }
+
 }

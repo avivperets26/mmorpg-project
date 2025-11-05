@@ -49,24 +49,37 @@ public class InventoryData
         return true;
     }
 
-    /// <summary>Clears the item's cells from the grid (if present).</summary>
+    /// <summary>
+    /// Clears all cells that reference this item (by reference), regardless of
+    /// the item's current x/y/size. This is safer during drags.
+    /// </summary>
     public void Remove(InventoryItem it)
     {
         if (it == null) return;
 
-        // Only clear cells that actually reference this item
-        for (int yy = 0; yy < it.Height; yy++)
-            for (int xx = 0; xx < it.Width; xx++)
-            {
-                int gx = it.x + xx;
-                int gy = it.y + yy;
-                if (gx >= 0 && gx < width && gy >= 0 && gy < height)
-                {
-                    if (_cells[gx, gy] == it)
-                        _cells[gx, gy] = null;
-                }
-            }
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                if (_cells[x, y] == it)
+                    _cells[x, y] = null;
     }
+
+    /// <summary>Same as Remove but returns true if anything was actually cleared.</summary>
+    public bool TryRemove(InventoryItem it)
+    {
+        if (it == null) return false;
+
+        int cleared = 0;
+        for (int y = 0; y < height; y++)
+            for (int x = 0; x < width; x++)
+                if (_cells[x, y] == it)
+                {
+                    _cells[x, y] = null;
+                    cleared++;
+                }
+
+        return cleared > 0;
+    }
+
 
     /// <summary>Returns the item occupying a given cell, or null if empty.</summary>
     public InventoryItem GetAt(int x, int y)

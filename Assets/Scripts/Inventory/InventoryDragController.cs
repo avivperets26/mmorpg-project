@@ -5,15 +5,16 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
+using Game.Items;
 
 public class InventoryDragController : MonoBehaviour
 {
     [Header("Wiring")]
-    [SerializeField] private PlayerInventory inventory;   // auto-found if null
-    [SerializeField] private InventoryUI inventoryUI;     // to call Refresh() after place
-    [SerializeField] private RectTransform gridRoot;      // same gridRoot used by InventoryUI
-    [SerializeField] private Canvas canvas;               // root canvas (for ScreenPoint->LocalPoint)
-    [SerializeField] private EquipmentController equipmentController; // ← NEW (auto-filled if missing)
+    [SerializeField] private PlayerInventory inventory;           // auto-found if null
+    [SerializeField] private InventoryUI inventoryUI;             // to call Refresh() after place
+    [SerializeField] private RectTransform gridRoot;              // same gridRoot used by InventoryUI
+    [SerializeField] private Canvas canvas;                       // root canvas (for ScreenPoint->LocalPoint)
+    [SerializeField] private EquipmentController equipmentController; // auto-filled if missing
 
     [Header("Drag Visuals")]
     [Tooltip("Scale multiplier while dragging.")]
@@ -27,8 +28,11 @@ public class InventoryDragController : MonoBehaviour
 
     private GridLayoutGroup _grid;
     private bool _dragging;
-    private InventoryItemView _pickedView;
-    private InventoryItem _pickedItem;
+
+    // IMPORTANT: after BeginDrag(), DO NOT rely on _pickedView (its GO is rebuilt by Refresh()).
+    private InventoryItemView _pickedView;    // only used to start drag
+    private InventoryItem _pickedItem;        // survives Refresh()
+    private ItemDefinition _pickedDef;        // survives Refresh()
     private int _origX, _origY;
 
     // Ghost image that follows the cursor
@@ -39,6 +43,20 @@ public class InventoryDragController : MonoBehaviour
     private RectTransform _footprintRect;
     private Image _footprintImg;
 
+    // Hover feedback over equipment slots
+    private EquipmentSlotUI _hoverSlotUI;
+    private Image _hoverSlotImage;
+    private Color _hoverSlotOriginal;
+    private bool _hoverCanEquip;
+
+    // Debounce: ignore mouse release until after this frame
+    private int _suppressReleaseUntilFrame = -1;
+
+    public static int LastEquipDropFrame = -100000;
+    public static bool IsDragging { get; private set; } = false;
+    private EquipmentSlot? _equipSourceSlot = null;
+
+
     private void Awake()
     {
         if (!inventory)
@@ -48,26 +66,26 @@ public class InventoryDragController : MonoBehaviour
 #else
             inventory = Object.FindObjectOfType<PlayerInventory>();
 #endif
+            if (!inventory) Debug.LogWarning("[Drag] Awake: PlayerInventory not found via auto-find.");
         }
 
-        if (!inventoryUI)
-            inventoryUI = GetComponent<InventoryUI>();
+        if (!inventoryUI) inventoryUI = GetComponent<InventoryUI>();
 
         if (!gridRoot && inventoryUI != null)
         {
-            // grab InventoryUI.gridRoot (private) via reflection to avoid duplicate wiring
+            // reflect InventoryUI.gridRoot so we don't need duplicate wiring
             var f = typeof(InventoryUI).GetField("gridRoot", BindingFlags.NonPublic | BindingFlags.Instance);
             gridRoot = (RectTransform)f?.GetValue(inventoryUI);
+            if (!gridRoot) Debug.LogWarning("[Drag] Awake: gridRoot not wired and not found on InventoryUI.");
         }
 
-        if (!canvas)
-            canvas = GetComponentInParent<Canvas>();
+        if (!canvas) canvas = GetComponentInParent<Canvas>();
 
-        // Try to get EquipmentController from InventoryUI (private field) if not wired
         if (!equipmentController && inventoryUI != null)
         {
             var ef = typeof(InventoryUI).GetField("equipmentController", BindingFlags.NonPublic | BindingFlags.Instance);
             equipmentController = (EquipmentController)ef?.GetValue(inventoryUI);
+            if (!equipmentController) Debug.LogWarning("[Drag] Awake: equipmentController not wired and not found on InventoryUI.");
         }
 
         _grid = gridRoot ? gridRoot.GetComponent<GridLayoutGroup>() : null;
@@ -82,6 +100,7 @@ public class InventoryDragController : MonoBehaviour
         // Cancel with Esc or Right-Click
         if (EscapeDown() || RightClickDown())
         {
+            Debug.Log("[Drag] Cancel requested (Esc/RightClick).");
             CancelDrag();
             return;
         }
@@ -89,8 +108,8 @@ public class InventoryDragController : MonoBehaviour
         var mouse = MousePos();
 
         // Move ghost to cursor (canvas space)
-        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
-            (RectTransform)canvas.transform, mouse, canvas.worldCamera, out var localCanvas))
+        if (_ghostRect && RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                (RectTransform)canvas.transform, mouse, canvas.worldCamera, out var localCanvas))
         {
             const float dragYOffset = -40f; // tweak to taste
             _ghostRect.anchoredPosition = localCanvas + new Vector2(0f, dragYOffset);
@@ -104,17 +123,37 @@ public class InventoryDragController : MonoBehaviour
         var (cellX, cellY) = LocalToCell(localGrid);
         ClampTopLeftForItem(ref cellX, ref cellY, _pickedItem);
 
-        // Update footprint overlay and cell dimming (we keep the footprint itself hidden)
+        // Update footprint overlay and cell dimming (footprint rect itself hidden)
         var fit = PreviewFootprintAt(cellX, cellY, _pickedItem);
-        _footprintImg.enabled = false;   // keep it invisible
+        if (_footprintImg) _footprintImg.enabled = false;
 
         inventoryUI.ClearHighlights();
         Color dim = fit ? new Color(0f, 0f, 0f, 0.5f) : new Color(0.5f, 0f, 0f, 0.5f);
         inventoryUI.HighlightCells(cellX, cellY, _pickedItem.Width, _pickedItem.Height, dim);
 
-        // Place/equip on left-click release
-        if (LeftClickDown())
+        // Equipment hover (turns slot green/red while hovering)
+        UpdateEquipmentHover(_pickedDef);
+
+        if (_hoverSlotUI)
         {
+            // Hide the grid footprint / highlights while hovering equipment
+            if (_footprintRect && _footprintRect.gameObject.activeSelf)
+                _footprintRect.gameObject.SetActive(false);
+
+            inventoryUI.ClearHighlights();
+        }
+        else
+        {
+            // Ensure the footprint can show again when we are back over the grid
+            if (_footprintRect && !_footprintRect.gameObject.activeSelf)
+                _footprintRect.gameObject.SetActive(true);
+        }
+
+        // Place/equip on left-click release (after debounce)
+        if (LeftClickReleased() && Time.frameCount >= _suppressReleaseUntilFrame)
+        {
+            Debug.Log("[Drag] Left click released while dragging (passed debounce).");
+
             // 1) Try to drop onto an equipment slot under the cursor
             if (TryEquipViaDropAtCursor())
             {
@@ -123,6 +162,7 @@ public class InventoryDragController : MonoBehaviour
                 inventoryUI.Refresh();
                 return;
             }
+            Debug.Log("[Drag] Equip failed (returned false), falling back to TryPlace on grid.");
 
             // 2) Otherwise, try to place back into the grid
             TryPlace(cellX, cellY);
@@ -131,52 +171,57 @@ public class InventoryDragController : MonoBehaviour
 
     public void OnItemClicked(InventoryItemView view)
     {
-        if (!_dragging)
-        {
-            BeginDrag(view);
-        }
-        else
-        {
-            // already dragging: ignore (could implement swap)
-        }
+        if (!_dragging) BeginDrag(view);
+        else Debug.Log("[Drag] OnItemClicked ignored: already dragging.");
     }
 
     private void OnDisable()
     {
-        // If the panel disables while dragging, clean up everything.
         if (_dragging)
         {
+            Debug.Log("[Drag] OnDisable while dragging → CancelDrag()");
             CancelDrag();
             return;
         }
 
-        // Ensure no orphan visuals remain
+        // Clean stragglers
         if (_footprintRect) Destroy(_footprintRect.gameObject);
-        _footprintRect = null;
-        _footprintImg = null;
-
+        _footprintRect = null; _footprintImg = null;
         if (_ghostRect) Destroy(_ghostRect.gameObject);
-        _ghostRect = null;
-        _ghostRaw = null;
+        _ghostRect = null; _ghostRaw = null;
     }
 
     private void BeginDrag(InventoryItemView view)
     {
         if (view == null || view.item == null) return;
 
-        // Safety: clear any stale visuals
+        Debug.Log($"[Drag] BeginDrag → {view.item.def?.displayName ?? "NULL"} @ ({view.item.x},{view.item.y})");
+
+        // Clear any stale visuals
         if (_footprintRect) { Destroy(_footprintRect.gameObject); _footprintRect = null; _footprintImg = null; }
         if (_ghostRect) { Destroy(_ghostRect.gameObject); _ghostRect = null; _ghostRaw = null; }
 
-        _pickedView = view;
-        _pickedItem = view.item;
+        _pickedView = view;               // transient
+        _pickedItem = view.item;          // persist
+        _pickedDef = view.item.def;      // persist
         inventoryUI.dragHiddenItem = _pickedItem;
 
         _origX = _pickedItem.x;
         _origY = _pickedItem.y;
 
-        // Free the cells while dragging so we can preview placement correctly
-        inventory.Data.Remove(_pickedItem);
+        if (inventory?.Data != null)
+        {
+            inventory.Data.Remove(_pickedItem); // void
+            Debug.Log("[Drag] BeginDrag: freed old footprint (Remove called).");
+        }
+        else
+        {
+            Debug.LogWarning("[Drag] BeginDrag: inventory or inventory.Data is NULL.");
+        }
+
+        // Prevent immediate drop on the same frame we start the drag
+        _suppressReleaseUntilFrame = Time.frameCount + 1;
+        Debug.Log($"[Drag] Debounce set: ignore releases until frame >= {_suppressReleaseUntilFrame}");
 
         // Build the ghost under the Canvas so it freely follows the cursor
         var tex = view.previewTexture != null ? view.previewTexture : view.raw.texture;
@@ -186,11 +231,12 @@ public class InventoryDragController : MonoBehaviour
         // Build footprint overlay under gridRoot
         _footprintRect = CreateFootprint();
         _footprintImg = _footprintRect.GetComponent<Image>();
-        _footprintImg.enabled = false; // stay invisible
+        if (_footprintImg) _footprintImg.enabled = false;
 
         _dragging = true;
+        IsDragging = true;
 
-        // Re-render UI without this item occupying cells
+        // Re-render UI without this item occupying cells (this destroys view's GO)
         inventoryUI.Refresh();
     }
 
@@ -200,14 +246,17 @@ public class InventoryDragController : MonoBehaviour
         _pickedItem.y = cellY;
         inventoryUI.dragHiddenItem = _pickedItem;
 
-        if (inventory.Data.Place(_pickedItem))
+        bool placed = inventory.Data.Place(_pickedItem);
+        Debug.Log($"[Drag] TryPlace @ ({cellX},{cellY}) => {placed}");
+
+        if (placed)
         {
             inventoryUI.ClearHighlights();
             EndDrag(commit: true);
         }
         else
         {
-            // invalid spot → keep dragging
+            Debug.Log("[Drag] TryPlace failed (spot invalid/blocked) — continue dragging.");
         }
 
         inventoryUI.Refresh();
@@ -215,7 +264,7 @@ public class InventoryDragController : MonoBehaviour
 
     private void CancelDrag()
     {
-        // return item to original coords
+        Debug.Log("[Drag] CancelDrag → returning item to original coords.");
         _pickedItem.x = _origX;
         _pickedItem.y = _origY;
         inventory.Data.Place(_pickedItem);
@@ -225,68 +274,106 @@ public class InventoryDragController : MonoBehaviour
 
     private void EndDrag(bool commit)
     {
+        Debug.Log($"[Drag] EndDrag commit={commit}");
+
         _dragging = false;
+        IsDragging = false;
 
         if (_ghostRect) Destroy(_ghostRect.gameObject);
         if (_footprintRect) Destroy(_footprintRect.gameObject);
+        if (_hoverSlotImage) _hoverSlotImage.color = _hoverSlotOriginal;
+
+        _hoverSlotUI = null;
+        _hoverSlotImage = null;
+        _hoverCanEquip = false;
 
         _ghostRect = null;
         _ghostRaw = null;
         _footprintRect = null;
         _footprintImg = null;
+        _equipSourceSlot = null;
 
+        _pickedView = null;   // its GO is gone anyway
+        _pickedDef = null;   // clear cached def
         _pickedItem = null;
-        _pickedView = null;
         inventoryUI.dragHiddenItem = null;
 
-        // Force UI refresh to rebuild proper views at new/old location
+        // Restore preview of the source equipment slot if hidden
+        if (_equipSourceSlot.HasValue && equipmentController != null)
+        {
+            var ui = equipmentController.GetSlotUI(_equipSourceSlot.Value);
+            if (ui != null) ui.SetPreviewVisible(true);
+        }
+
+
         inventoryUI.Refresh();
     }
 
-    // ---------- NEW: drop-to-equip ----------
+    // ---------- Drop-to-equip ----------
+    // Replace TryEquipViaDropAtCursor() with the version below (or edit the body accordingly)
     private bool TryEquipViaDropAtCursor()
     {
-        Debug.Log("[Drag] Left click while dragging → trying equip via raycast...");
+        if (equipmentController == null || _pickedDef == null) return false;
 
-        if (equipmentController == null || _pickedView == null || _pickedView.item == null)
-            return false;
+        bool equipped = false;
 
-        var es = EventSystem.current;
-        if (es == null) return false;
-
-        var ped = new PointerEventData(es)
+        if (_hoverSlotUI)
         {
-            position = MousePos()
-        };
-
-        var hits = new List<RaycastResult>();
-        es.RaycastAll(ped, hits);
-
-        for (int i = 0; i < hits.Count; i++)
-        {
-            var slotUI = hits[i].gameObject.GetComponentInParent<EquipmentSlotUI>();
-            if (slotUI == null) continue;
-            Debug.Log($"[Drag] Raycast hit slot UI: {slotUI.name} (slot {slotUI.Slot})");
-
-            var def = _pickedView.item.def;
-            if (def == null) { Debug.Log("[Drag] Picked view has no definition."); return false; }
-
-
-            // Try to equip via controller
-            if (equipmentController.TryEquip(def))
+            if (_hoverCanEquip)
             {
-                Debug.Log($"[Drag] Equipped {def.displayName} via drop. Removing from inventory.");
-                // remove from inventory and finish
-                inventory.Remove(_pickedView.item);
-                return true;
+                // If dragging FROM another equipment slot, move instead of duplicating
+                if (_equipSourceSlot.HasValue)
+                {
+                    equipped = equipmentController.MoveEquip(_equipSourceSlot.Value, _hoverSlotUI.Slot);
+                }
+                else
+                {
+                    equipped = equipmentController.TryEquipInto(_hoverSlotUI.Slot, _pickedDef, fromInventory: true);
+                }
             }
-            Debug.Log($"[Drag] Equip rejected for {def.displayName} (requirements/slot busy).");
-            // found a slot but equip failed (requirements/full etc.)
-            return false;
+            else
+            {
+                equipmentController.PreviewCanEquip(_pickedDef, _hoverSlotUI.Slot, out var reason);
+                Debug.Log($"[Drag] Cannot equip into slot={_hoverSlotUI.Slot}: {reason}");
+            }
+        }
+        else
+        {
+            // Drop on grid: either equip (auto) when dragging from grid,
+            // or UNEQUIP to inventory when dragging from equipment.
+            if (_equipSourceSlot.HasValue)
+            {
+                // Unequip from slot → add to inventory
+                equipped = equipmentController.TryUnequip(_equipSourceSlot.Value);
+            }
+            else
+            {
+                equipped = equipmentController.TryEquip(_pickedDef, fromInventory: true);
+            }
         }
 
-        return false; // no slot hit
+        if (equipped)
+        {
+            // If we dragged from GRID → remove that instance (already done in BeginDrag)
+            if (!_equipSourceSlot.HasValue && inventory != null && _pickedItem != null)
+            {
+                inventory.Remove(_pickedItem);
+                Debug.Log($"[Drag] Post-equip: removed INVENTORY INSTANCE of dragged item (frame={Time.frameCount}).");
+            }
+
+            LastEquipDropFrame = Time.frameCount;
+            inventoryUI.ClearHighlights();
+            equipmentController.RefreshUI();
+
+            EndDrag(commit: true);
+            inventoryUI.Refresh();
+            _equipSourceSlot = null;
+            return true;
+        }
+
+        return false;
     }
+
 
     // -------- Helpers --------
     private RectTransform CreateGhost(Texture tex, Vector2 size)
@@ -315,7 +402,7 @@ public class InventoryDragController : MonoBehaviour
         var le = go.AddComponent<LayoutElement>(); // keep it out of GridLayoutGroup
         le.ignoreLayout = true;
 
-        rt.anchorMin = Vector2.up;   // top-left (0,1)
+        rt.anchorMin = Vector2.up;   // (0,1) top-left
         rt.anchorMax = Vector2.up;
         rt.pivot = new Vector2(0f, 1f);
 
@@ -323,9 +410,8 @@ public class InventoryDragController : MonoBehaviour
         img.type = Image.Type.Sliced;
         img.sprite = footprintSprite;
         img.raycastTarget = false;
-
-        img.enabled = false;         // stay invisible
-        go.SetActive(false);         // hidden until first position
+        img.enabled = false;
+        go.SetActive(false);
 
         return rt;
     }
@@ -347,11 +433,14 @@ public class InventoryDragController : MonoBehaviour
         float hPx = it.Height * cs.y + (it.Height - 1) * sp.y;
 
         // Position & size footprint rect (anchored to grid top-left)
-        _footprintRect.anchoredPosition = new Vector2(px, -py);
-        _footprintRect.sizeDelta = new Vector2(wPx, hPx);
+        if (_footprintRect)
+        {
+            _footprintRect.anchoredPosition = new Vector2(px, -py);
+            _footprintRect.sizeDelta = new Vector2(wPx, hPx);
 
-        if (!_footprintRect.gameObject.activeSelf)
-            _footprintRect.gameObject.SetActive(true);
+            if (!_footprintRect.gameObject.activeSelf)
+                _footprintRect.gameObject.SetActive(true);
+        }
 
         // Test validity using InventoryData.CanPlace with the candidate coords
         int prevX = it.x; int prevY = it.y;
@@ -367,7 +456,6 @@ public class InventoryDragController : MonoBehaviour
         var rect = gridRoot.rect;
         var pivot = gridRoot.pivot;
 
-        // Convert local (pivoted) coords to "top-left origin" space
         float left = -rect.width * pivot.x;
         float top = rect.height * (1f - pivot.y);
 
@@ -391,16 +479,105 @@ public class InventoryDragController : MonoBehaviour
         cy = Mathf.Clamp(cy, 0, inventory.Data.height - it.Height);
     }
 
+    // ---------- Hover feedback over equipment slots ----------
+    private void UpdateEquipmentHover(ItemDefinition def)
+    {
+        // clear previous highlight
+        if (_hoverSlotImage)
+        {
+            _hoverSlotImage.color = _hoverSlotOriginal;
+            _hoverSlotUI = null;
+            _hoverSlotImage = null;
+            _hoverCanEquip = false;
+        }
+
+        var es = EventSystem.current;
+        if (es == null || def == null) return;
+
+        var ped = new PointerEventData(es) { position = MousePos() };
+        var hits = new List<RaycastResult>();
+        es.RaycastAll(ped, hits);
+
+        for (int i = 0; i < hits.Count; i++)
+        {
+            var slotUI = hits[i].gameObject.GetComponentInParent<EquipmentSlotUI>();
+            if (!slotUI) continue;
+
+            var img = slotUI.GetComponent<Image>();
+            if (!img) break;
+
+            _hoverSlotUI = slotUI;
+            _hoverSlotImage = img;
+            _hoverSlotOriginal = img.color;
+
+            string reason;
+            _hoverCanEquip = equipmentController.PreviewCanEquip(def, slotUI.Slot, out reason);
+            img.color = _hoverCanEquip
+                ? new Color(0f, 1f, 0f, 0.35f)   // green
+                : new Color(1f, 0f, 0f, 0.35f);  // red
+
+            Debug.Log($"[Drag] Hover slot={slotUI.Slot}, canEquip={_hoverCanEquip}, reason='{reason}'");
+            break; // first hit is enough
+        }
+    }
+
+    public void BeginDragFromEquipment(EquipmentSlot sourceSlot, ItemDefinition def, RenderTexture optionalPreview = null)
+    {
+        if (_dragging) return;
+
+        _equipSourceSlot = sourceSlot;
+        _pickedDef = def;
+
+        // Build a temporary InventoryItem so grid footprint preview works
+        _pickedItem = new InventoryItem { def = def, x = 0, y = 0, rotated = false };
+        inventoryUI.dragHiddenItem = null; // nothing to hide on grid
+
+        Debug.Log($"[Drag] BeginDragFromEquipment → {_pickedDef.displayName} from {sourceSlot}");
+
+        // Hide slot preview while dragging (avoid duplicate)
+        if (equipmentController != null)
+        {
+            var ui = equipmentController.GetSlotUI(sourceSlot);
+            if (ui != null) ui.SetPreviewVisible(false);
+        }
+
+        // Ghost (render at higher resolution to keep it crisp)
+        const int ghostRT = 512;
+        var tex = optionalPreview
+            ? optionalPreview
+            : ItemPreviewRenderer.Instance.Render(def, ghostRT, ghostRT);
+
+        // The on-screen ghost can stay ~256 px; the 512 RT keeps it sharp
+        _ghostRect = CreateGhost(tex, new Vector2(256, 256));
+        _ghostRect.localScale = Vector3.one * dragScale;
+
+        // Footprint overlay (for grid drops)
+        _footprintRect = CreateFootprint();
+        _footprintImg = _footprintRect.GetComponent<Image>();
+        if (_footprintImg) _footprintImg.enabled = false;
+
+        _suppressReleaseUntilFrame = Time.frameCount + 1;
+        _dragging = true;
+        IsDragging = true;
+
+        // Make equipment slot visually “selected” by forcing a repaint after hover color clears
+        if (equipmentController) equipmentController.RefreshUI();
+    }
+
     // --- Input System helpers ---
     private static Vector2 MousePos() =>
         Mouse.current != null ? (Vector2)Mouse.current.position.ReadValue() : Vector2.zero;
 
-    private static bool LeftClickDown() =>
-        Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
+    private static bool LeftClickReleased() =>
+        Mouse.current != null && Mouse.current.leftButton.wasReleasedThisFrame;
 
     private static bool RightClickDown() =>
         Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame;
 
     private static bool EscapeDown() =>
         Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame;
+
+    // Forward access to the EquipmentController
+    public EquipmentSlotUI GetSlotUI(EquipmentSlot slot) => equipmentController?.GetSlotUI(slot);
+
 }

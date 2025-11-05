@@ -98,10 +98,15 @@ public class StatAllocationUI : MonoBehaviour
     private static void EnsureRichText(TMP_Text t)
     {
         if (!t) return;
-        t.richText = true;                     // fixes </alpha> showing
+        t.richText = true;
+#if UNITY_2021_3_OR_NEWER
+    t.textWrappingMode = TextWrappingModes.Normal;
+#else
         t.enableWordWrapping = true;
+#endif
         t.overflowMode = TextOverflowModes.Overflow;
     }
+
 
     private void OnEnable()
     {

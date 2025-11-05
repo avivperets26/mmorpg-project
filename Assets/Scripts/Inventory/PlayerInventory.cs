@@ -38,9 +38,6 @@ public class PlayerInventory : MonoBehaviour
             Debug.LogWarning("[Inventory] TryAdd called with null ItemDefinition");
             return false;
         }
-
-        Debug.Log($"[Inventory] Trying to add item: {def.displayName}");
-
         // Try both orientations (not rotated, then rotated) to maximize fit.
         for (int pass = 0; pass < 2; pass++)
         {
@@ -61,10 +58,11 @@ public class PlayerInventory : MonoBehaviour
                     if (Data.Place(candidate))
                     {
                         _items.Add(candidate);
-                        Debug.Log($"[Inventory] Added {def.displayName} at ({x},{y}) rot:{rotated}");
+                        Debug.Log($"[Inventory] Added '{def.displayName}' at {x},{y}, rotated={rotated}. Count={_items.Count}");
                         Changed?.Invoke();
                         return true;
                     }
+
                 }
             }
         }
@@ -78,12 +76,29 @@ public class PlayerInventory : MonoBehaviour
     /// </summary>
     public void Remove(InventoryItem it)
     {
-        if (it == null) return;
+        if (it == null)
+        {
+            Debug.LogWarning("[Inventory] Remove called with NULL instance");
+            return;
+        }
 
+        int before = _items.Count;
+        bool had = _items.Contains(it);
+
+        // Clear any cells referencing this specific instance
         Data.Remove(it);
-        _items.Remove(it);
+
+        // Remove instance from list
+        bool removed = _items.Remove(it);
+        int after = _items.Count;
+
+        Debug.Log($"[Inventory] RemoveInstance → def='{it.def?.displayName ?? "NULL"}', " +
+                  $"hadBefore={had}, removedNow={removed}, count {before}→{after}, " +
+                  $"coords=({it.x},{it.y}), rotated={it.rotated}");
+
         Changed?.Invoke();
     }
+
 
     /// <summary>
     /// Convenience: removes the first placed instance of a given definition.

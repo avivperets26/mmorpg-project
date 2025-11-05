@@ -39,8 +39,6 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
 
     public void Interact(GameObject interactor)
     {
-        Debug.Log($"🪄 Interact called on {name}");
-
         if (!def)
         {
             Debug.LogWarning("❌ Missing ItemDefinition!");
@@ -55,11 +53,8 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
         }
 
         bool added = inv.TryAdd(def);
-        Debug.Log($"📦 TryAdd result: {added}");
-
         if (added)
         {
-            Debug.Log($"✅ Picked up {def.displayName}");
             Destroy(gameObject);
         }
         else
