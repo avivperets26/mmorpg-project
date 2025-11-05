@@ -20,6 +20,7 @@ public class EquipmentSlotUI : MonoBehaviour, IPointerClickHandler
 
     private EquipmentController _ctrl;
     private ItemDefinition _current;                 // cache what we’re showing
+    private bool _hiddenForDrag = false; // <— NEW
 
     public void Init(EquipmentSlot slot, EquipmentController controller)
     {
@@ -55,23 +56,19 @@ public class EquipmentSlotUI : MonoBehaviour, IPointerClickHandler
     {
         _current = def;
 
-        // 1) Label always reflects state (nice fallback)
         if (label) label.text = def ? def.displayName : _slot.ToString();
-
-        // 2) Hide 2D icon – we’ll show the 3D preview instead
         if (icon) icon.enabled = false;
 
-        // 3) 3D preview
         if (!previewRaw) return;
 
         if (def == null)
         {
             previewRaw.texture = null;
             previewRaw.color = new Color(1, 1, 1, 0);
+            // keep enabled as-is (empty state is fine)
             return;
         }
 
-        // Size the RT roughly to slot size (keeps it crisp)
         var rect = (transform as RectTransform)?.rect ?? new Rect(0, 0, 192, 192);
         int rtW = Mathf.Clamp(Mathf.RoundToInt(Mathf.Max(96f, rect.width)), 96, 1024);
         int rtH = Mathf.Clamp(Mathf.RoundToInt(Mathf.Max(96f, rect.height)), 96, 1024);
@@ -80,10 +77,14 @@ public class EquipmentSlotUI : MonoBehaviour, IPointerClickHandler
         previewRaw.texture = rt;
         previewRaw.color = Color.white;
 
+        // ✅ Ensure visible in case it was hidden during drag
+        previewRaw.enabled = !_hiddenForDrag;
+
 #if UNITY_EDITOR
-        Debug.Log($"[SlotUI] ShowItem slot={_slot} → label='{label?.text}', RT=({rtW}x{rtH})");
+    Debug.Log($"[SlotUI] ShowItem slot={_slot} → label='{label?.text}', RT=({rtW}x{rtH})");
 #endif
     }
+
 
     public void OnPointerClick(PointerEventData eventData)
     {
@@ -108,7 +109,9 @@ public class EquipmentSlotUI : MonoBehaviour, IPointerClickHandler
     // Public helper so other scripts can hide the slot's preview while dragging
     public void SetPreviewVisible(bool visible)
     {
+        _hiddenForDrag = !visible;
         if (previewRaw) previewRaw.enabled = visible;
     }
+
 
 }

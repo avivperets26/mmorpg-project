@@ -291,20 +291,20 @@ public class InventoryDragController : MonoBehaviour
         _ghostRaw = null;
         _footprintRect = null;
         _footprintImg = null;
-        _equipSourceSlot = null;
 
-        _pickedView = null;   // its GO is gone anyway
-        _pickedDef = null;   // clear cached def
-        _pickedItem = null;
-        inventoryUI.dragHiddenItem = null;
-
-        // Restore preview of the source equipment slot if hidden
-        if (_equipSourceSlot.HasValue && equipmentController != null)
+        // ✅ Restore BEFORE clearing _equipSourceSlot
+        var sourceSlot = _equipSourceSlot;
+        if (sourceSlot.HasValue && equipmentController != null)
         {
-            var ui = equipmentController.GetSlotUI(_equipSourceSlot.Value);
+            var ui = equipmentController.GetSlotUI(sourceSlot.Value);
             if (ui != null) ui.SetPreviewVisible(true);
         }
+        _equipSourceSlot = null;
 
+        _pickedView = null;
+        _pickedDef = null;
+        _pickedItem = null;
+        inventoryUI.dragHiddenItem = null;
 
         inventoryUI.Refresh();
     }
@@ -528,9 +528,9 @@ public class InventoryDragController : MonoBehaviour
         _equipSourceSlot = sourceSlot;
         _pickedDef = def;
 
-        // Build a temporary InventoryItem so grid footprint preview works
+        // Build a temporary InventoryItem so grid footprint preview works on grid drops
         _pickedItem = new InventoryItem { def = def, x = 0, y = 0, rotated = false };
-        inventoryUI.dragHiddenItem = null; // nothing to hide on grid
+        inventoryUI.dragHiddenItem = null;
 
         Debug.Log($"[Drag] BeginDragFromEquipment → {_pickedDef.displayName} from {sourceSlot}");
 
@@ -541,13 +541,12 @@ public class InventoryDragController : MonoBehaviour
             if (ui != null) ui.SetPreviewVisible(false);
         }
 
-        // Ghost (render at higher resolution to keep it crisp)
-        const int ghostRT = 512;
-        var tex = optionalPreview
-            ? optionalPreview
-            : ItemPreviewRenderer.Instance.Render(def, ghostRT, ghostRT);
+        // 🔧 Always render a crisp, dedicated ghost RT (ignore slot’s tiny RT)
+        const int ghostRT = 768; // 512–1024 is fine; 768 balances quality/VRAM
+        var tex = ItemPreviewRenderer.Instance.Render(def, ghostRT, ghostRT);
+        if (tex) ((RenderTexture)tex).filterMode = FilterMode.Bilinear;
 
-        // The on-screen ghost can stay ~256 px; the 512 RT keeps it sharp
+        // The on-screen ghost can be ~256px; the 768 RT keeps it sharp
         _ghostRect = CreateGhost(tex, new Vector2(256, 256));
         _ghostRect.localScale = Vector3.one * dragScale;
 
@@ -559,10 +558,8 @@ public class InventoryDragController : MonoBehaviour
         _suppressReleaseUntilFrame = Time.frameCount + 1;
         _dragging = true;
         IsDragging = true;
-
-        // Make equipment slot visually “selected” by forcing a repaint after hover color clears
-        if (equipmentController) equipmentController.RefreshUI();
     }
+
 
     // --- Input System helpers ---
     private static Vector2 MousePos() =>
