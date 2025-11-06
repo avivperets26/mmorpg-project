@@ -1,7 +1,9 @@
 // Assets/Scripts/Player/PlayerStats.cs
+using System;
 using UnityEngine;
 using Game.Items;
 
+[DisallowMultipleComponent]
 public class PlayerStats : MonoBehaviour
 {
     [Header("Movement")]
@@ -34,9 +36,47 @@ public class PlayerStats : MonoBehaviour
     [Header("Progression")]
     public int level = 1;
 
+    // --- Vitals & Experience (runtime) ---
+    [Header("Vitals (runtime)")]
+    [SerializeField] private int currentHp;
+    [SerializeField] private int currentMp;
+
+    [Header("Experience")]
+    [SerializeField] private int currentXp = 0;
+    [SerializeField] private int xpToNext = 100;
+
+    // --- Events the UI / systems can listen to ---
+    public event Action OnVitalsChanged;
+    public event Action OnXpChanged;
+    public event Action OnLevelChanged;
+
     // --- Convenience ---
     public bool BootsEquipped => moveSpeedMultiplier > 1f;
     public float GetEffectiveMoveSpeed() => baseMoveSpeed * moveSpeedMultiplier;
+
+    // Public vitals getters (caps are computed from level & attributes)
+    public int CurrentHp => currentHp;
+    public int CurrentMp => currentMp;
+    public int MaxHp => 100 + 10 * level + 20 * vitality; // mirrors StatAllocationUI
+    public int MaxMp => 50 + 5 * level + 15 * energy;   // mirrors StatAllocationUI
+
+    public int CurrentXp => currentXp;
+    public int XpToNext => xpToNext;
+    public float XpNormalized => xpToNext <= 0 ? 0f : Mathf.Clamp01(currentXp / (float)xpToNext);
+
+    // ---------- Unity ----------
+    private void Start()
+    {
+        // Initialize vitals to full on start
+        currentHp = MaxHp;
+        currentMp = MaxMp;
+
+        // Initialize XP requirement for next level
+        xpToNext = ExpRequiredFor(level + 1);
+
+        RaiseVitals();
+        RaiseXP();
+    }
 
     // ---- Movement from boots ----
     public void EquipBoots(float speedMultiplier)
@@ -106,5 +146,89 @@ public class PlayerStats : MonoBehaviour
         dexterity += Mathf.Max(0, dDex);
         vitality += Mathf.Max(0, dVit);
         energy += Mathf.Max(0, dEng);
+
+        // If attributes changed, caps may have changed too.
+        RecalculateCapsAndClamp();
     }
+
+    // ================== New public API for HUD / gameplay ==================
+
+    public void GainXp(int amount)
+    {
+        if (amount <= 0) return;
+
+        currentXp += amount;
+        while (currentXp >= xpToNext)
+        {
+            currentXp -= xpToNext;
+            LevelUp();
+        }
+        RaiseXP();
+    }
+
+    public void TakeDamage(int amount)
+    {
+        if (amount <= 0) return;
+        currentHp = Mathf.Max(0, currentHp - amount);
+        RaiseVitals();
+    }
+
+    public void Heal(int amount)
+    {
+        if (amount <= 0) return;
+        currentHp = Mathf.Min(MaxHp, currentHp + amount);
+        RaiseVitals();
+    }
+
+    public void SpendMana(int amount)
+    {
+        if (amount <= 0) return;
+        currentMp = Mathf.Max(0, currentMp - amount);
+        RaiseVitals();
+    }
+
+    public void RestoreMana(int amount)
+    {
+        if (amount <= 0) return;
+        currentMp = Mathf.Min(MaxMp, currentMp + amount);
+        RaiseVitals();
+    }
+
+    /// <summary>
+    /// Call this after changing level or attributes to ensure current values
+    /// don't exceed new caps.
+    /// </summary>
+    public void RecalculateCapsAndClamp()
+    {
+        currentHp = Mathf.Min(currentHp, MaxHp);
+        currentMp = Mathf.Min(currentMp, MaxMp);
+        RaiseVitals();
+    }
+
+    // ====================== Internals ======================
+
+    private void LevelUp()
+    {
+        level++;
+        xpToNext = ExpRequiredFor(level + 1);
+
+        // On level-up, refill to the new caps feels nice (change to taste)
+        currentHp = MaxHp;
+        currentMp = MaxMp;
+
+        RaiseVitals();
+        RaiseXP();
+        OnLevelChanged?.Invoke();
+    }
+
+    // Simple curve: triangular numbers * 100
+    // L2=100, L3=300, L4=600, L5=1000, ...
+    private int ExpRequiredFor(int targetLevel)
+    {
+        int n = Mathf.Max(2, targetLevel);
+        return (n - 1) * n / 2 * 100;
+    }
+
+    private void RaiseVitals() => OnVitalsChanged?.Invoke();
+    private void RaiseXP() => OnXpChanged?.Invoke();
 }
