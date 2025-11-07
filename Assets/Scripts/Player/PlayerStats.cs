@@ -1,4 +1,3 @@
-// Assets/Scripts/Player/PlayerStats.cs
 using System;
 using UnityEngine;
 using Game.Items;
@@ -9,8 +8,6 @@ public class PlayerStats : MonoBehaviour
     [Header("Movement")]
     [Tooltip("Base run speed without any gear.")]
     public float baseMoveSpeed = 5f;
-
-    // Multiplicative bonus from boots (or other effects)
     private float moveSpeedMultiplier = 1f;
 
     // --- Combat aggregates from equipped items (additive for MVP) ---
@@ -41,9 +38,26 @@ public class PlayerStats : MonoBehaviour
     [SerializeField] private int currentHp;
     [SerializeField] private int currentMp;
 
+    [Header("Rules")]
+    public bool refillOnLevelUp = true;
+
     [Header("Experience")]
     [SerializeField] private int currentXp = 0;
     [SerializeField] private int xpToNext = 100;
+
+    // ===== Startup configuration (Inspector-controlled) =====
+    public enum StartVitalsMode { Full, Percent, Absolute }
+
+    [Header("Startup Vitals (Inspector)")]
+    public StartVitalsMode startMode = StartVitalsMode.Percent;
+
+    [Range(0f, 1f)] public float startHpPercent = 0.5f;
+    [Range(0f, 1f)] public float startMpPercent = 0.5f;
+
+    [Tooltip("Used only when mode = Absolute. -1 means use Max.")]
+    public int startHpAbsolute = -1;
+    [Tooltip("Used only when mode = Absolute. -1 means use Max.")]
+    public int startMpAbsolute = -1;
 
     // --- Events the UI / systems can listen to ---
     public event Action OnVitalsChanged;
@@ -58,7 +72,7 @@ public class PlayerStats : MonoBehaviour
     public int CurrentHp => currentHp;
     public int CurrentMp => currentMp;
     public int MaxHp => 100 + 10 * level + 20 * vitality; // mirrors StatAllocationUI
-    public int MaxMp => 50 + 5 * level + 15 * energy;   // mirrors StatAllocationUI
+    public int MaxMp => 50 + 5 * level + 15 * energy;      // mirrors StatAllocationUI
 
     public int CurrentXp => currentXp;
     public int XpToNext => xpToNext;
@@ -67,16 +81,56 @@ public class PlayerStats : MonoBehaviour
     // ---------- Unity ----------
     private void Start()
     {
-        // Initialize vitals to full on start
-        currentHp = MaxHp;
-        currentMp = MaxMp;
+        // XP to next level using your WoW-style step: XP_n = level * 50
+        xpToNext = ExpToNextFor(level);
 
-        // Initialize XP requirement for next level
-        xpToNext = ExpRequiredFor(level + 1);
+        // Compute starting HP/MP based on inspector mode
+        int maxHp = MaxHp;
+        int maxMp = MaxMp;
+
+        switch (startMode)
+        {
+            case StartVitalsMode.Full:
+                currentHp = maxHp;
+                currentMp = maxMp;
+                break;
+
+            case StartVitalsMode.Percent:
+                currentHp = Mathf.Clamp(Mathf.RoundToInt(maxHp * startHpPercent), 0, maxHp);
+                currentMp = Mathf.Clamp(Mathf.RoundToInt(maxMp * startMpPercent), 0, maxMp);
+                break;
+
+            case StartVitalsMode.Absolute:
+                currentHp = Mathf.Clamp(startHpAbsolute < 0 ? maxHp : startHpAbsolute, 0, maxHp);
+                currentMp = Mathf.Clamp(startMpAbsolute < 0 ? maxMp : startMpAbsolute, 0, maxMp);
+                break;
+        }
 
         RaiseVitals();
         RaiseXP();
     }
+
+    private void OnValidate()
+    {
+        // keep sliders sane
+        startHpPercent = Mathf.Clamp01(startHpPercent);
+        startMpPercent = Mathf.Clamp01(startMpPercent);
+
+        // level must be at least 1
+        if (level < 1) level = 1;
+
+        // Recompute XP needed to go from 'level' -> 'level + 1'
+        xpToNext = ExpToNextFor(level);      // WoW-style step: level * 50
+
+        // If we're in the editor (not playing), keep current vitals within new caps
+        // so the Inspector always shows consistent numbers when you tweak stats.
+        if (!Application.isPlaying)
+        {
+            currentHp = Mathf.Min(currentHp, MaxHp);
+            currentMp = Mathf.Min(currentMp, MaxMp);
+        }
+    }
+
 
     // ---- Movement from boots ----
     public void EquipBoots(float speedMultiplier)
@@ -134,25 +188,18 @@ public class PlayerStats : MonoBehaviour
         return true;
     }
 
-    public void RefundPoint()
-    {
-        availableStatPoints++;
-    }
+    public void RefundPoint() => availableStatPoints++;
 
-    /// <summary>Legacy support if you ever need to apply deltas again.</summary>
     public void ApplyDelta(int dStr, int dDex, int dVit, int dEng)
     {
         strength += Mathf.Max(0, dStr);
         dexterity += Mathf.Max(0, dDex);
         vitality += Mathf.Max(0, dVit);
         energy += Mathf.Max(0, dEng);
-
-        // If attributes changed, caps may have changed too.
         RecalculateCapsAndClamp();
     }
 
-    // ================== New public API for HUD / gameplay ==================
-
+    // ================== Public API ==================
     public void GainXp(int amount)
     {
         if (amount <= 0) return;
@@ -194,10 +241,6 @@ public class PlayerStats : MonoBehaviour
         RaiseVitals();
     }
 
-    /// <summary>
-    /// Call this after changing level or attributes to ensure current values
-    /// don't exceed new caps.
-    /// </summary>
     public void RecalculateCapsAndClamp()
     {
         currentHp = Mathf.Min(currentHp, MaxHp);
@@ -206,27 +249,55 @@ public class PlayerStats : MonoBehaviour
     }
 
     // ====================== Internals ======================
-
     private void LevelUp()
     {
         level++;
-        xpToNext = ExpRequiredFor(level + 1);
+        xpToNext = ExpToNextFor(level);
 
-        // On level-up, refill to the new caps feels nice (change to taste)
-        currentHp = MaxHp;
-        currentMp = MaxMp;
+        if (refillOnLevelUp)
+        {
+            currentHp = MaxHp;
+            currentMp = MaxMp;
+            RaiseVitals();
+        }
 
-        RaiseVitals();
         RaiseXP();
         OnLevelChanged?.Invoke();
     }
 
-    // Simple curve: triangular numbers * 100
-    // L2=100, L3=300, L4=600, L5=1000, ...
-    private int ExpRequiredFor(int targetLevel)
+    // XP needed to go from 'currentLevel' -> 'currentLevel + 1'
+    // Based on your WoW approximation: XP_step = currentLevel * 50
+    private int ExpToNextFor(int currentLevel)
     {
-        int n = Mathf.Max(2, targetLevel);
-        return (n - 1) * n / 2 * 100;
+        // WoW-style: incremental per level = currentLevel * 50
+        return Mathf.Max(1, currentLevel) * 50;
+    }
+
+    private int TotalXpToReachLevel(int targetLevel)
+    {
+        // Σ(i * 50) = 25 * (L^2 - L)
+        int L = Mathf.Max(1, targetLevel);
+        return 25 * (L * L - L);
+    }
+
+    public int GetMobXp(int mobLevel)
+    {
+        int sameLevelXp = (mobLevel * 5) + 45;
+        int diff = mobLevel - level;
+
+        float mult =
+            diff == 0 ? 1f :
+            diff > 0 ? (1f + 0.05f * diff) :
+                       (1f + (2f / 11f) * diff); // diff is negative
+
+        // Prevent negatives
+        int xp = Mathf.RoundToInt(sameLevelXp * Mathf.Max(0f, mult));
+        return xp;
+    }
+
+    public void GainXpFromMob(int mobLevel)
+    {
+        GainXp(GetMobXp(mobLevel));
     }
 
     private void RaiseVitals() => OnVitalsChanged?.Invoke();
