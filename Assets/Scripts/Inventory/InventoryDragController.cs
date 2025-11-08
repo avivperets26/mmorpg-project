@@ -15,6 +15,8 @@ public class InventoryDragController : MonoBehaviour
     [SerializeField] private RectTransform gridRoot;              // same gridRoot used by InventoryUI
     [SerializeField] private Canvas canvas;                       // root canvas (for ScreenPoint->LocalPoint)
     [SerializeField] private EquipmentController equipmentController; // auto-filled if missing
+    [SerializeField] private Canvas dragCanvas;  // assign DragCanvas in Inspector
+
 
     [Header("Drag Visuals")]
     [Tooltip("Scale multiplier while dragging.")]
@@ -380,19 +382,17 @@ public class InventoryDragController : MonoBehaviour
     {
         var go = new GameObject("DragGhost", typeof(RectTransform), typeof(CanvasRenderer), typeof(RawImage));
         var rt = go.GetComponent<RectTransform>();
-        go.transform.SetParent(canvas.transform, false);
+        go.transform.SetParent((dragCanvas ? dragCanvas.transform : canvas.transform), false);
         rt.anchorMin = rt.anchorMax = new Vector2(0.5f, 0.5f);
         rt.pivot = new Vector2(0.5f, 0.5f);
         rt.sizeDelta = size;
 
         _ghostRaw = go.GetComponent<RawImage>();
         _ghostRaw.texture = tex;
-        _ghostRaw.raycastTarget = false; // don't block UI raycasts
+        _ghostRaw.raycastTarget = false;
         _ghostRaw.color = new Color(1f, 1f, 1f, 0.9f);
-
         return rt;
     }
-
     private RectTransform CreateFootprint()
     {
         var go = new GameObject("FootprintPreview", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
