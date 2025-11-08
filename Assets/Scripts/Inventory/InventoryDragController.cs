@@ -420,13 +420,14 @@ public class InventoryDragController : MonoBehaviour
     {
         var cs = _grid.cellSize;
         var sp = _grid.spacing;
+        var pad = _grid.padding;
 
         float pitchX = cs.x + sp.x;
         float pitchY = cs.y + sp.y;
 
-        // Top-left pixel within the grid for this cell
-        float px = cellX * pitchX;
-        float py = cellY * pitchY;
+        // Top-left pixel within the grid for this cell (include padding)
+        float px = pad.left + cellX * pitchX;
+        float py = pad.top + cellY * pitchY;
 
         // Size in pixels across footprint
         float wPx = it.Width * cs.x + (it.Width - 1) * sp.x;
@@ -435,7 +436,7 @@ public class InventoryDragController : MonoBehaviour
         // Position & size footprint rect (anchored to grid top-left)
         if (_footprintRect)
         {
-            _footprintRect.anchoredPosition = new Vector2(px, -py);
+            _footprintRect.anchoredPosition = new Vector2(px, -py); // anchorMin/Max = (0,1), pivot=(0,1)
             _footprintRect.sizeDelta = new Vector2(wPx, hPx);
 
             if (!_footprintRect.gameObject.activeSelf)
@@ -459,16 +460,22 @@ public class InventoryDragController : MonoBehaviour
         float left = -rect.width * pivot.x;
         float top = rect.height * (1f - pivot.y);
 
-        Vector2 tl = new Vector2(left, top);
-        Vector2 fromTL = localInGrid - tl;
+        Vector2 tl = new Vector2(left, top);     // grid rect top-left in local space
+        Vector2 fromTL = localInGrid - tl;           // vector from grid rect top-left
 
         var cs = _grid.cellSize;
         var sp = _grid.spacing;
+        var pad = _grid.padding;
+
         float pitchX = cs.x + sp.x;
         float pitchY = cs.y + sp.y;
 
-        int cx = Mathf.FloorToInt(fromTL.x / pitchX);
-        int cy = Mathf.FloorToInt(-fromTL.y / pitchY); // Y grows downward
+        // Remove padding so (0,0) corresponds to the first inner cell
+        float adjX = fromTL.x - pad.left;       // rightwards positive
+        float adjY = -fromTL.y - pad.top;       // downwards positive (note the minus)
+
+        int cx = Mathf.FloorToInt(adjX / pitchX);
+        int cy = Mathf.FloorToInt(adjY / pitchY);
 
         return (cx, cy);
     }

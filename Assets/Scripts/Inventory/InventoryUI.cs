@@ -33,6 +33,9 @@ public class InventoryUI : MonoBehaviour
     [HideInInspector] public InventoryItem dragHiddenItem;  // Temporarily hidden while dragging
     [SerializeField] private EquipmentController equipmentController;
 
+    [Header("Requirement Visuals")]
+    [SerializeField] private Sprite requirementFailIcon;
+    [SerializeField] private Color requirementFailTint = new Color(1f, 0f, 0f, 0.5f);
 
     // grid/cache
     private int _cols, _rows;
@@ -173,7 +176,8 @@ public class InventoryUI : MonoBehaviour
         // 1) Clear previous overlays
         ClearItemViews();
 
-        // 2) Reset all cells
+        // 2) Reset all cells (we don't rely on cell tinting anymore for req-fail;
+        //    this just restores the empty look)
         for (int y = 0; y < _rows; y++)
         {
             for (int x = 0; x < _cols; x++)
@@ -203,50 +207,49 @@ public class InventoryUI : MonoBehaviour
             int w = Mathf.Max(1, it.Width);
             int h = Mathf.Max(1, it.Height);
 
+            // grid metrics (include padding)
             var cs = _grid.cellSize;
             var sp = _grid.spacing;
+            var pad = _grid.padding;
 
             float pitchX = cs.x + sp.x;
             float pitchY = cs.y + sp.y;
 
-            // top-left of the footprint in grid space
-            float px = it.x * pitchX;
-            float py = it.y * pitchY;
+            // top-left of the footprint in grid space (padding-aware)
+            float px = pad.left + it.x * pitchX;
+            float py = pad.top + it.y * pitchY;
 
             // pixel size of the footprint
             float spanW = w * cs.x + (w - 1) * sp.x;
             float spanH = h * cs.y + (h - 1) * sp.y;
-
-            // Ask renderer for an RT that matches the footprint aspect
-            int rtW = Mathf.Max(64, Mathf.RoundToInt(previewSize * w));
-            int rtH = Mathf.Max(64, Mathf.RoundToInt(previewSize * h));
-            var rt = ItemPreviewRenderer.Instance.Render(def, rtW, rtH);
-            if (rt == null || !rt.IsCreated()) continue;
 
             // --- Container over the footprint (top-left anchored) ---
             var container = new GameObject($"ItemView_{def.displayName}_Container", typeof(RectTransform));
             var contRect = container.GetComponent<RectTransform>();
             container.transform.SetParent(gridRoot, false);
 
-            // ignore layout
             var contLayout = container.AddComponent<LayoutElement>();
             contLayout.ignoreLayout = true;
 
-            // anchor to grid top-left so math matches footprint preview
             contRect.anchorMin = Vector2.up;   // (0,1)
             contRect.anchorMax = Vector2.up;
             contRect.pivot = new Vector2(0f, 1f);
 
-            // EXACT footprint size
+            // EXACT footprint size & position (top-left)
             contRect.sizeDelta = new Vector2(spanW, spanH);
-
-            // place container so its center is at the footprint center
-            contRect.anchoredPosition = new Vector2(px + spanW * 0.5f, -(py + spanH * 0.5f));
-
-            // optional 2D nudge from def.preview
-            if (def.preview != null) contRect.anchoredPosition += def.preview.uiOffsetPx;
-
+            contRect.anchoredPosition = new Vector2(px, -py);
             contRect.localRotation = Quaternion.identity;
+
+            // Ask renderer for an RT that matches the footprint aspect
+            int rtW = Mathf.Max(64, Mathf.RoundToInt(previewSize * w));
+            int rtH = Mathf.Max(64, Mathf.RoundToInt(previewSize * h));
+            var rt = ItemPreviewRenderer.Instance.Render(def, rtW, rtH);
+            if (rt == null || !rt.IsCreated())
+            {
+                // cleanup container if no RT was produced
+                Destroy(container);
+                continue;
+            }
 
             // --- RawImage child filling the container ---
             var imgGO = new GameObject("Image", typeof(RectTransform), typeof(RawImage));
@@ -282,7 +285,7 @@ public class InventoryUI : MonoBehaviour
             view.dragCtrl = dragController;
             view.previewTexture = rt;
 
-            // Equipment hookup
+            // Equipment + inventory hookup
             view.equipment = equipmentController;
             view.inventory = inventory;
 
@@ -296,21 +299,56 @@ public class InventoryUI : MonoBehaviour
             contRect.SetAsLastSibling();
             _itemViews.Add(container);
 
-            // Optional: dim covered cells (visual polish)
-            for (int dy = 0; dy < h; dy++)
-                for (int dx = 0; dx < w; dx++)
+            // --- Requirement check + container-wide visuals ---
+            bool meetsReq = true;
+            if (equipmentController != null && def != null)
+                meetsReq = equipmentController.MeetsRequirementsPublic(def);
+
+            if (!meetsReq)
+            {
+                // background (behind the image)
+                var bgGO = new GameObject("ReqFailBg", typeof(RectTransform), typeof(Image));
+                bgGO.transform.SetParent(container.transform, false);
+
+                var bgRect = bgGO.GetComponent<RectTransform>();
+                bgRect.anchorMin = Vector2.zero;
+                bgRect.anchorMax = Vector2.one;
+                bgRect.offsetMin = Vector2.zero;
+                bgRect.offsetMax = Vector2.zero;
+
+                var bgImg = bgGO.GetComponent<Image>();
+                bgImg.color = requirementFailTint;  // alpha 0.5 already set in the serialized field
+                bgImg.raycastTarget = false;
+
+                // ensure it sits behind the item image
+                bgRect.SetAsFirstSibling();
+
+                // badge (top-right)
+                if (requirementFailIcon != null)
                 {
-                    int cx = it.x + dx, cy = it.y + dy;
-                    if (cx < 0 || cx >= _cols || cy < 0 || cy >= _rows) continue;
-                    _cells[cx, cy].color = new Color(0f, 0f, 0f, 0.5f);
+                    var badgeGO = new GameObject("ReqFailBadge", typeof(RectTransform), typeof(Image));
+                    badgeGO.transform.SetParent(container.transform, false);
+
+                    var bRect = badgeGO.GetComponent<RectTransform>();
+                    bRect.anchorMin = new Vector2(1f, 1f);
+                    bRect.anchorMax = new Vector2(1f, 1f);
+                    bRect.pivot = new Vector2(1f, 1f);
+                    bRect.anchoredPosition = new Vector2(-4f, -4f);
+                    bRect.sizeDelta = new Vector2(22f, 22f);
+
+                    var bImg = badgeGO.GetComponent<Image>();
+                    bImg.sprite = requirementFailIcon;
+                    bImg.preserveAspect = true;
+                    bImg.raycastTarget = false;
                 }
+            }
         }
 
         if (IsOpen && EventSystem.current != null)
-        {
             StartCoroutine(TriggerTooltipUnderCursorNextFrame());
-        }
     }
+
+
 
     // --- Tooltip replay helpers ---
     private System.Collections.IEnumerator TriggerTooltipUnderCursorNextFrame()

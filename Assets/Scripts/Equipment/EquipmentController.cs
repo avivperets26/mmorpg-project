@@ -403,4 +403,9 @@ public class EquipmentController : MonoBehaviour
         };
     }
 
+    public bool MeetsRequirementsPublic(ItemDefinition def)
+    {
+        return MeetsRequirements(def, out _);
+    }
+
 }
