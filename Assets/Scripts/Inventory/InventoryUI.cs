@@ -98,6 +98,9 @@ public class InventoryUI : MonoBehaviour
         if (IsOpen) return;
         if (inventoryPanel) inventoryPanel.SetActive(true);
 
+        var cg = inventoryPanel.GetComponent<CanvasGroup>();
+        if (cg) { cg.blocksRaycasts = true; cg.interactable = true; }
+
         // Tooltip replay only (UIBlocker handles guard/input/cursor)
         UiCoroutineRunner.Run(OpenAfterDelay());
     }
@@ -176,8 +179,7 @@ public class InventoryUI : MonoBehaviour
         // 1) Clear previous overlays
         ClearItemViews();
 
-        // 2) Reset all cells (we don't rely on cell tinting anymore for req-fail;
-        //    this just restores the empty look)
+        // 2) Reset all cells to their empty look
         for (int y = 0; y < _rows; y++)
         {
             for (int x = 0; x < _cols; x++)
@@ -234,8 +236,6 @@ public class InventoryUI : MonoBehaviour
             contRect.anchorMin = Vector2.up;   // (0,1)
             contRect.anchorMax = Vector2.up;
             contRect.pivot = new Vector2(0f, 1f);
-
-            // EXACT footprint size & position (top-left)
             contRect.sizeDelta = new Vector2(spanW, spanH);
             contRect.anchoredPosition = new Vector2(px, -py);
             contRect.localRotation = Quaternion.identity;
@@ -246,12 +246,11 @@ public class InventoryUI : MonoBehaviour
             var rt = ItemPreviewRenderer.Instance.Render(def, rtW, rtH);
             if (rt == null || !rt.IsCreated())
             {
-                // cleanup container if no RT was produced
                 Destroy(container);
                 continue;
             }
 
-            // --- RawImage child filling the container ---
+            // --- Item image filling the container ---
             var imgGO = new GameObject("Image", typeof(RectTransform), typeof(RawImage));
             imgGO.transform.SetParent(container.transform, false);
 
@@ -266,7 +265,7 @@ public class InventoryUI : MonoBehaviour
 
             ivRaw.texture = rt;
             ivRaw.color = Color.white;
-            ivRaw.raycastTarget = true; // need IPointerEnter/Exit
+            ivRaw.raycastTarget = true;
 
             // Hover spin
             var hover = imgGO.AddComponent<ItemPreviewHover>();
@@ -277,76 +276,72 @@ public class InventoryUI : MonoBehaviour
             hover.spinDegreesPerSecond = 40f;
             hover.returnDegreesPerSecond = 180f;
 
-            // Drag view
+            // Drag view hookup
             var view = imgGO.AddComponent<InventoryItemView>();
             view.item = it;
             view.container = contRect;
             view.raw = ivRaw;
             view.dragCtrl = dragController;
             view.previewTexture = rt;
-
-            // Equipment + inventory hookup
             view.equipment = equipmentController;
             view.inventory = inventory;
 
             // Tooltip hookup
-            var tip = imgGO.GetComponent<InventorySlotTooltip>();
-            if (!tip) tip = imgGO.AddComponent<InventorySlotTooltip>();
+            var tip = imgGO.GetComponent<InventorySlotTooltip>() ?? imgGO.AddComponent<InventorySlotTooltip>();
             tip.itemInstance = new Game.Items.ItemInstance(def, def.defaultTier);
-            tip.targetOverride = contRect; // tooltip hugs the footprint container
+            tip.targetOverride = contRect;
 
             // keep container on top
             contRect.SetAsLastSibling();
             _itemViews.Add(container);
 
-            // --- Requirement check + container-wide visuals ---
+            // --- Background overlay (always) + optional badge ---
             bool meetsReq = true;
             if (equipmentController != null && def != null)
                 meetsReq = equipmentController.MeetsRequirementsPublic(def);
 
-            if (!meetsReq)
+            // 1) Background overlay (put it ABOVE the item so it always shows)
+            var bgGO = new GameObject("ItemBg", typeof(RectTransform), typeof(Image));
+            bgGO.transform.SetParent(container.transform, false);
+
+            var bgRect = bgGO.GetComponent<RectTransform>();
+            bgRect.anchorMin = Vector2.zero;
+            bgRect.anchorMax = Vector2.one;
+            bgRect.offsetMin = Vector2.zero;
+            bgRect.offsetMax = Vector2.zero;
+
+            var bgImg = bgGO.GetComponent<Image>();
+            var okTint = new Color(0f, 0f, 0f, 0.40f); // slightly stronger so it’s always visible
+            bgImg.color = meetsReq ? okTint : requirementFailTint;
+            bgImg.raycastTarget = false;
+
+            // ⬇️ Put background as the LAST sibling (above the item image)
+            bgRect.SetAsLastSibling();
+
+            // 2) Optional fail badge (only when failing)
+            if (!meetsReq && requirementFailIcon != null)
             {
-                // background (behind the image)
-                var bgGO = new GameObject("ReqFailBg", typeof(RectTransform), typeof(Image));
-                bgGO.transform.SetParent(container.transform, false);
+                var badgeGO = new GameObject("ReqFailBadge", typeof(RectTransform), typeof(Image));
+                badgeGO.transform.SetParent(container.transform, false);
+                var bRect = badgeGO.GetComponent<RectTransform>();
+                bRect.anchorMin = bRect.anchorMax = bRect.pivot = new Vector2(1f, 1f);
+                bRect.anchoredPosition = new Vector2(-4f, -4f);
+                bRect.sizeDelta = new Vector2(22f, 22f);
 
-                var bgRect = bgGO.GetComponent<RectTransform>();
-                bgRect.anchorMin = Vector2.zero;
-                bgRect.anchorMax = Vector2.one;
-                bgRect.offsetMin = Vector2.zero;
-                bgRect.offsetMax = Vector2.zero;
+                var bImg = badgeGO.GetComponent<Image>();
+                bImg.sprite = requirementFailIcon;
+                bImg.preserveAspect = true;
+                bImg.raycastTarget = false;
 
-                var bgImg = bgGO.GetComponent<Image>();
-                bgImg.color = requirementFailTint;  // alpha 0.5 already set in the serialized field
-                bgImg.raycastTarget = false;
-
-                // ensure it sits behind the item image
-                bgRect.SetAsFirstSibling();
-
-                // badge (top-right)
-                if (requirementFailIcon != null)
-                {
-                    var badgeGO = new GameObject("ReqFailBadge", typeof(RectTransform), typeof(Image));
-                    badgeGO.transform.SetParent(container.transform, false);
-
-                    var bRect = badgeGO.GetComponent<RectTransform>();
-                    bRect.anchorMin = new Vector2(1f, 1f);
-                    bRect.anchorMax = new Vector2(1f, 1f);
-                    bRect.pivot = new Vector2(1f, 1f);
-                    bRect.anchoredPosition = new Vector2(-4f, -4f);
-                    bRect.sizeDelta = new Vector2(22f, 22f);
-
-                    var bImg = badgeGO.GetComponent<Image>();
-                    bImg.sprite = requirementFailIcon;
-                    bImg.preserveAspect = true;
-                    bImg.raycastTarget = false;
-                }
+                // keep badge on top of the overlay
+                bRect.SetAsLastSibling();
             }
         }
 
         if (IsOpen && EventSystem.current != null)
             StartCoroutine(TriggerTooltipUnderCursorNextFrame());
     }
+
 
 
 

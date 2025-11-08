@@ -122,6 +122,13 @@ public class ItemPreviewRenderer : MonoBehaviour
 
         var prevTarget = _cam.targetTexture;
         _cam.targetTexture = rt;
+
+        // 🔧 Force transparent clear to guarantee alpha=0 outside the mesh, on all pipelines.
+        var prevActive = RenderTexture.active;
+        RenderTexture.active = rt;
+        GL.Clear(true, true, new Color(0f, 0f, 0f, 0f));
+        RenderTexture.active = prevActive;
+
         _cam.enabled = true;
         _cam.Render();
         _cam.enabled = false;
@@ -132,6 +139,7 @@ public class ItemPreviewRenderer : MonoBehaviour
         _cache[key] = rt;
         return rt;
     }
+
 
     private void FrameModel(Transform modelRoot, float padding, float aspect)
     {

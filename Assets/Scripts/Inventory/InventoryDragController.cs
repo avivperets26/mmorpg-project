@@ -173,10 +173,10 @@ public class InventoryDragController : MonoBehaviour
 
     public void OnItemClicked(InventoryItemView view)
     {
+        Debug.Log($"[Drag] OnItemClicked received for '{view?.item?.def?.displayName}' dragging={_dragging}");
         if (!_dragging) BeginDrag(view);
         else Debug.Log("[Drag] OnItemClicked ignored: already dragging.");
     }
-
     private void OnDisable()
     {
         if (_dragging)
@@ -341,16 +341,16 @@ public class InventoryDragController : MonoBehaviour
         }
         else
         {
-            // Drop on grid: either equip (auto) when dragging from grid,
-            // or UNEQUIP to inventory when dragging from equipment.
+            // not hovering any EquipmentSlotUI
             if (_equipSourceSlot.HasValue)
             {
-                // Unequip from slot → add to inventory
+                // dragging from equipment → drop to grid means UNEQUIP to inventory
                 equipped = equipmentController.TryUnequip(_equipSourceSlot.Value);
             }
             else
             {
-                equipped = equipmentController.TryEquip(_pickedDef, fromInventory: true);
+                // dragging from inventory → do NOT auto-equip; let caller TryPlace on grid
+                return false;
             }
         }
 

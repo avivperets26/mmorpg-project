@@ -117,14 +117,22 @@ public class UIBlocker : MonoBehaviour
     {
         if (!playerInput || string.IsNullOrEmpty(uiActionMap)) return;
         var map = playerInput.actions?.FindActionMap(uiActionMap);
-        if (map != null) playerInput.SwitchCurrentActionMap(uiActionMap);
+        if (map != null)
+        {
+            playerInput.SwitchCurrentActionMap(uiActionMap);
+            Debug.Log($"[UIBlocker] Switched PlayerInput map -> '{uiActionMap}'");
+        }
     }
 
     private void SwitchToGameplayMap()
     {
         if (!playerInput || string.IsNullOrEmpty(gameplayActionMap)) return;
         var map = playerInput.actions?.FindActionMap(gameplayActionMap);
-        if (map != null) playerInput.SwitchCurrentActionMap(gameplayActionMap);
+        if (map != null)
+        {
+            playerInput.SwitchCurrentActionMap(gameplayActionMap);
+            Debug.Log($"[UIBlocker] Restored PlayerInput map -> '{gameplayActionMap}'");
+        }
     }
 
     // ---------- Specific actions ----------
@@ -146,8 +154,8 @@ public class UIBlocker : MonoBehaviour
         if (_cachedActions.Count == 0) return;
         foreach (var act in _cachedActions)
         {
-            if (disable) act.Disable();
-            else act.Enable();
+            if (disable) { act.Disable(); Debug.Log($"[UIBlocker] Disabled action '{act.name}'"); }
+            else { act.Enable(); Debug.Log($"[UIBlocker] Enabled action '{act.name}'"); }
         }
     }
 

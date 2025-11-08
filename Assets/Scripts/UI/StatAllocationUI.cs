@@ -150,6 +150,17 @@ public class StatAllocationUI : MonoBehaviour
             return;
         }
 
+        // If this component isn't active yet, run the coroutine on a global runner.
+        if (!isActiveAndEnabled)
+        {
+            // Make sure the panel is visible if we're animating to 1
+            if (to >= 1f && rootPanel && !rootPanel.activeSelf)
+                rootPanel.SetActive(true);
+
+            UiCoroutineRunner.Run(FadeCo(to, dur, enableInteractionAtEnd, onDone));
+            return;
+        }
+
         if (_fadeCo != null) StopCoroutine(_fadeCo);
         _fadeCo = StartCoroutine(FadeCo(to, dur, enableInteractionAtEnd, onDone));
     }
