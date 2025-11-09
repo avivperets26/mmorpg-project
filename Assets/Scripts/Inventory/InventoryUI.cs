@@ -254,7 +254,7 @@ public class InventoryUI : MonoBehaviour
             var imgGO = new GameObject("Image", typeof(RectTransform), typeof(RawImage));
             imgGO.transform.SetParent(container.transform, false);
 
-            var imgRect = imgGO.GetComponent<RectTransform>();
+            var imgRect = imgGO.GetComponent<RectTransform>(); // <-- keep this
             var ivRaw = imgGO.GetComponent<RawImage>();
 
             imgRect.anchorMin = Vector2.zero;
@@ -289,7 +289,7 @@ public class InventoryUI : MonoBehaviour
             // Tooltip hookup
             var tip = imgGO.GetComponent<InventorySlotTooltip>() ?? imgGO.AddComponent<InventorySlotTooltip>();
             tip.itemInstance = new Game.Items.ItemInstance(def, def.defaultTier);
-            tip.targetOverride = contRect;
+            tip.targetOverride = imgRect;
 
             // keep container on top
             contRect.SetAsLastSibling();
@@ -348,20 +348,30 @@ public class InventoryUI : MonoBehaviour
     // --- Tooltip replay helpers ---
     private System.Collections.IEnumerator TriggerTooltipUnderCursorNextFrame()
     {
-        yield return null;
+        yield return null; // next frame (after Refresh)
 
         var es = EventSystem.current;
-        var ped = new PointerEventData(es)
-        {
-#if ENABLE_INPUT_SYSTEM
-            position = UnityEngine.InputSystem.Mouse.current != null
-                ? UnityEngine.InputSystem.Mouse.current.position.ReadValue()
-                : (Vector2)Input.mousePosition
-#else
-            position = (Vector2)Input.mousePosition
-#endif
-        };
+        if (es == null || gridRoot == null) yield break;
 
+        // mouse position
+        Vector2 pos;
+#if ENABLE_INPUT_SYSTEM
+    pos = UnityEngine.InputSystem.Mouse.current != null
+        ? UnityEngine.InputSystem.Mouse.current.position.ReadValue()
+        : (Vector2)Input.mousePosition;
+#else
+        pos = (Vector2)Input.mousePosition;
+#endif
+
+        // only if cursor is inside the inventory grid
+        var canvas = gridRoot.GetComponentInParent<Canvas>();
+        var cam = (canvas && canvas.renderMode == RenderMode.ScreenSpaceOverlay) ? null : Camera.main;
+        if (!RectTransformUtility.RectangleContainsScreenPoint(gridRoot, pos, cam))
+            yield break;
+
+        var ped = new PointerEventData(es) { position = pos };
+
+        // ⬇️ you were missing this call
         var results = new List<RaycastResult>();
         es.RaycastAll(ped, results);
 
@@ -369,13 +379,14 @@ public class InventoryUI : MonoBehaviour
         {
             var tip = results[i].gameObject.GetComponent<InventorySlotTooltip>()
                       ?? results[i].gameObject.GetComponentInParent<InventorySlotTooltip>();
-            if (tip != null)
+            if (tip != null && tip.enabled && tip.itemInstance != null && tip.itemInstance.def != null)
             {
                 tip.OnPointerEnter(ped);
                 break;
             }
         }
     }
+
 
     private System.Collections.IEnumerator ReplayPointerEnterUnderCursor()
     {

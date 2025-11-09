@@ -102,7 +102,6 @@ public class InventoryDragController : MonoBehaviour
         // Cancel with Esc or Right-Click
         if (EscapeDown() || RightClickDown())
         {
-            Debug.Log("[Drag] Cancel requested (Esc/RightClick).");
             CancelDrag();
             return;
         }
@@ -154,7 +153,6 @@ public class InventoryDragController : MonoBehaviour
         // Place/equip on left-click release (after debounce)
         if (LeftClickReleased() && Time.frameCount >= _suppressReleaseUntilFrame)
         {
-            Debug.Log("[Drag] Left click released while dragging (passed debounce).");
 
             // 1) Try to drop onto an equipment slot under the cursor
             if (TryEquipViaDropAtCursor())
@@ -164,7 +162,6 @@ public class InventoryDragController : MonoBehaviour
                 inventoryUI.Refresh();
                 return;
             }
-            Debug.Log("[Drag] Equip failed (returned false), falling back to TryPlace on grid.");
 
             // 2) Otherwise, try to place back into the grid
             TryPlace(cellX, cellY);
@@ -173,7 +170,6 @@ public class InventoryDragController : MonoBehaviour
 
     public void OnItemClicked(InventoryItemView view)
     {
-        Debug.Log($"[Drag] OnItemClicked received for '{view?.item?.def?.displayName}' dragging={_dragging}");
         if (!_dragging) BeginDrag(view);
         else Debug.Log("[Drag] OnItemClicked ignored: already dragging.");
     }
@@ -181,7 +177,6 @@ public class InventoryDragController : MonoBehaviour
     {
         if (_dragging)
         {
-            Debug.Log("[Drag] OnDisable while dragging → CancelDrag()");
             CancelDrag();
             return;
         }
@@ -196,8 +191,6 @@ public class InventoryDragController : MonoBehaviour
     private void BeginDrag(InventoryItemView view)
     {
         if (view == null || view.item == null) return;
-
-        Debug.Log($"[Drag] BeginDrag → {view.item.def?.displayName ?? "NULL"} @ ({view.item.x},{view.item.y})");
 
         // Clear any stale visuals
         if (_footprintRect) { Destroy(_footprintRect.gameObject); _footprintRect = null; _footprintImg = null; }
@@ -214,7 +207,6 @@ public class InventoryDragController : MonoBehaviour
         if (inventory?.Data != null)
         {
             inventory.Data.Remove(_pickedItem); // void
-            Debug.Log("[Drag] BeginDrag: freed old footprint (Remove called).");
         }
         else
         {
@@ -223,7 +215,6 @@ public class InventoryDragController : MonoBehaviour
 
         // Prevent immediate drop on the same frame we start the drag
         _suppressReleaseUntilFrame = Time.frameCount + 1;
-        Debug.Log($"[Drag] Debounce set: ignore releases until frame >= {_suppressReleaseUntilFrame}");
 
         // Build the ghost under the Canvas so it freely follows the cursor
         var tex = view.previewTexture != null ? view.previewTexture : view.raw.texture;
@@ -266,7 +257,6 @@ public class InventoryDragController : MonoBehaviour
 
     private void CancelDrag()
     {
-        Debug.Log("[Drag] CancelDrag → returning item to original coords.");
         _pickedItem.x = _origX;
         _pickedItem.y = _origY;
         inventory.Data.Place(_pickedItem);
@@ -276,8 +266,6 @@ public class InventoryDragController : MonoBehaviour
 
     private void EndDrag(bool commit)
     {
-        Debug.Log($"[Drag] EndDrag commit={commit}");
-
         _dragging = false;
         IsDragging = false;
 
@@ -336,7 +324,6 @@ public class InventoryDragController : MonoBehaviour
             else
             {
                 equipmentController.PreviewCanEquip(_pickedDef, _hoverSlotUI.Slot, out var reason);
-                Debug.Log($"[Drag] Cannot equip into slot={_hoverSlotUI.Slot}: {reason}");
             }
         }
         else
@@ -360,7 +347,6 @@ public class InventoryDragController : MonoBehaviour
             if (!_equipSourceSlot.HasValue && inventory != null && _pickedItem != null)
             {
                 inventory.Remove(_pickedItem);
-                Debug.Log($"[Drag] Post-equip: removed INVENTORY INSTANCE of dragged item (frame={Time.frameCount}).");
             }
 
             LastEquipDropFrame = Time.frameCount;
@@ -523,7 +509,6 @@ public class InventoryDragController : MonoBehaviour
                 ? new Color(0f, 1f, 0f, 0.35f)   // green
                 : new Color(1f, 0f, 0f, 0.35f);  // red
 
-            Debug.Log($"[Drag] Hover slot={slotUI.Slot}, canEquip={_hoverCanEquip}, reason='{reason}'");
             break; // first hit is enough
         }
     }
@@ -538,8 +523,6 @@ public class InventoryDragController : MonoBehaviour
         // Build a temporary InventoryItem so grid footprint preview works on grid drops
         _pickedItem = new InventoryItem { def = def, x = 0, y = 0, rotated = false };
         inventoryUI.dragHiddenItem = null;
-
-        Debug.Log($"[Drag] BeginDragFromEquipment → {_pickedDef.displayName} from {sourceSlot}");
 
         // Hide slot preview while dragging (avoid duplicate)
         if (equipmentController != null)

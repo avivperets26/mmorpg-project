@@ -1,11 +1,12 @@
 // Assets/Scripts/Input/UiInputGuard.cs
+//#define UI_INPUT_GUARD_LOGS
+
 using System;
 using UnityEngine; // RuntimeInitializeOnLoadMethod / RuntimeInitializeLoadType
 
 /// <summary>
 /// Tiny global blocker with stacking semantics.
 /// Any UI that should *fully* block gameplay should Push on open and Pop on close.
-/// UIBlocker does this automatically when placed on a panel.
 /// </summary>
 public static class UiInputGuard
 {
@@ -22,7 +23,7 @@ public static class UiInputGuard
     public static void Push(object owner = null)
     {
         _blockCount++;
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
+#if (UNITY_EDITOR || DEVELOPMENT_BUILD) && UI_INPUT_GUARD_LOGS
         Debug.Log($"[UiInputGuard] Push by {owner?.GetType().Name ?? "unknown"} -> count={_blockCount}");
 #endif
     }
@@ -30,7 +31,7 @@ public static class UiInputGuard
     public static void Pop(object owner = null)
     {
         if (_blockCount > 0) _blockCount--;
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
+#if (UNITY_EDITOR || DEVELOPMENT_BUILD) && UI_INPUT_GUARD_LOGS
         Debug.Log($"[UiInputGuard] Pop by {owner?.GetType().Name ?? "unknown"} -> count={_blockCount}");
 #endif
     }

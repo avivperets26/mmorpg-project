@@ -42,7 +42,9 @@ public class InventorySlotTooltip : MonoBehaviour,
 
     public void OnPointerEnter(PointerEventData e)
     {
-        if (itemInstance == null || tooltip == null) return;
+        // hard guard: no tooltip for empty slots
+        if (tooltip == null || itemInstance == null || itemInstance.def == null)
+            return;
 
         var target = targetOverride ? targetOverride : (RectTransform)transform;
         tooltip.ShowFrom(this, itemInstance, target);

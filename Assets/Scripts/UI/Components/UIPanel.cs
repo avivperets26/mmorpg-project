@@ -65,9 +65,7 @@ public class UIPanel : MonoBehaviour
     public void InternalOpen(bool invokeBackend)
     {
         if (!root) root = gameObject;
-        Debug.Log($"[UIPanel] InternalOpen '{name}', invoke={invokeBackend}, BEFORE active={root.activeSelf}");
         root.SetActive(true);
-        Debug.Log($"[UIPanel] InternalOpen '{name}', AFTER active={root.activeSelf}");
         if (invokeBackend) OnOpen?.Invoke();
     }
 

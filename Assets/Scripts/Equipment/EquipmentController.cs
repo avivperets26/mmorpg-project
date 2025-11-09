@@ -1,4 +1,5 @@
 // Assets/Scripts/Equipment/EquipmentController.cs
+using System;
 using System.Collections.Generic;
 using System.Linq;            // for ToArray in RefreshUI()
 using UnityEngine;
@@ -27,8 +28,12 @@ public class EquipmentController : MonoBehaviour
     [SerializeField] private EquipmentSlotUI rightHand;
     [SerializeField] private EquipmentSlotUI leftHand;
 
-    // Current equipped state
+    // Current equipped state (Definition-per-slot storage for now)
     private readonly Dictionary<EquipmentSlot, ItemDefinition> _equipped = new();
+
+    // ---- Tooltip/slots can subscribe to be notified when equipment changes ----
+    public event Action EquippedChanged;
+    private void RaiseEquippedChanged() => EquippedChanged?.Invoke();
 
     private void Awake()
     {
@@ -185,6 +190,9 @@ public class EquipmentController : MonoBehaviour
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
 
+        // Inform listeners (tooltips, slot binders, etc.)
+        RaiseEquippedChanged();
+
         // Defensive repaint in case any UI rebuilt this frame
         RefreshUI();
         return true;
@@ -208,6 +216,9 @@ public class EquipmentController : MonoBehaviour
         Debug.Log($"[Equip] Equipped {def.displayName} into {slot} (frame={Time.frameCount}).");
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
+
+        // Inform listeners (tooltips, slot binders, etc.)
+        RaiseEquippedChanged();
 
         // If any UI elements were rebuilt during the drag/drop, make sure all slot UIs match state.
         RefreshUI();
@@ -331,10 +342,27 @@ public class EquipmentController : MonoBehaviour
         if (def.subtype == ItemSubtype.Boots) playerStats.UnequipBoots();
     }
 
-
+    // ----------------------------------------------------------------------
+    // Public accessors for external scripts (tooltips, drag controller, etc.)
+    // ----------------------------------------------------------------------
     public ItemDefinition GetEquipped(EquipmentSlot slot)
     {
         return _equipped.TryGetValue(slot, out var d) ? d : null;
+    }
+
+    /// <summary>
+    /// If in future you store real instances per slot, return them here.
+    /// For now, return null so tooltip binder creates a temporary ItemInstance from definition.
+    /// </summary>
+    public Game.Items.ItemInstance GetEquippedInstance(EquipmentSlot slot)
+    {
+        return null;
+    }
+
+    /// <summary>Current equipped definition in a slot (null if empty).</summary>
+    public ItemDefinition GetEquippedDefinition(EquipmentSlot slot)
+    {
+        return GetEquipped(slot);
     }
 
     /// <summary>Move the equipped item from one slot to another without passing through the inventory.</summary>
@@ -375,10 +403,15 @@ public class EquipmentController : MonoBehaviour
         }
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
+
+        // Inform listeners
+        RaiseEquippedChanged();
+
         RefreshUI();
         DumpEquipped();
         return true;
     }
+
     // ----------------------------------------------------------------------
     // Public accessor for external scripts (like InventoryDragController)
     // ----------------------------------------------------------------------
@@ -407,5 +440,4 @@ public class EquipmentController : MonoBehaviour
     {
         return MeetsRequirements(def, out _);
     }
-
 }

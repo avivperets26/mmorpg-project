@@ -1,15 +1,17 @@
+// Assets/Scripts/UI/Management/UIPanelManager.cs
 using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.SceneManagement;
-using UnityEngine.Profiling;
 using Object = UnityEngine.Object;
 
 [DefaultExecutionOrder(-200)]
 public class UIPanelManager : MonoBehaviour
 {
     public static UIPanelManager Instance { get; private set; }
+
+    [Header("Debug")]
+    [SerializeField] private bool debugLogs = false;
 
     private readonly Dictionary<string, HashSet<UIPanel>> _groups = new();
     private readonly List<UIPanel> _allPanels = new();
@@ -22,7 +24,6 @@ public class UIPanelManager : MonoBehaviour
 
     private void Start()
     {
-        // Unity 2022.2+: this finds *scene* objects and can include inactive
 #if UNITY_2022_2_OR_NEWER
         var panels = Object.FindObjectsByType<UIPanel>(
             FindObjectsInactive.Include,
@@ -31,7 +32,6 @@ public class UIPanelManager : MonoBehaviour
         foreach (var p in panels)
             if (p.gameObject.scene.IsValid()) Register(p);
 #else
-        // Fallback: filter out prefab assets (no valid scene)
         var panels = Resources.FindObjectsOfTypeAll<UIPanel>();
         foreach (var p in panels)
             if (p && p.gameObject.scene.IsValid())
@@ -49,7 +49,6 @@ public class UIPanelManager : MonoBehaviour
             _groups[panel.GroupId] = set;
         }
 
-        // HashSet prevents dupes
         bool firstTime = set.Add(panel);
         if (!_allPanels.Contains(panel)) _allPanels.Add(panel);
 
@@ -60,8 +59,8 @@ public class UIPanelManager : MonoBehaviour
             else panel.InternalOpen(invokeBackend: false);
         }
 
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        Debug.Log($"[UIPanelManager] Registered '{panel.name}' (group='{panel.GroupId}', startHidden={panel.StartHidden})");
+#if (UNITY_EDITOR || DEVELOPMENT_BUILD)
+        if (debugLogs) Debug.Log($"[UIPanelManager] Registered '{panel.name}' (group='{panel.GroupId}', startHidden={panel.StartHidden})");
 #endif
     }
 
@@ -70,8 +69,8 @@ public class UIPanelManager : MonoBehaviour
         if (panel == null) return;
         if (_groups.TryGetValue(panel.GroupId, out var set)) set.Remove(panel);
         _allPanels.Remove(panel);
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-        Debug.Log($"[UIPanelManager] Unregistered '{panel.name}'");
+#if (UNITY_EDITOR || DEVELOPMENT_BUILD)
+        if (debugLogs) Debug.Log($"[UIPanelManager] Unregistered '{panel.name}'");
 #endif
     }
 
@@ -90,19 +89,19 @@ public class UIPanelManager : MonoBehaviour
 
             if (kb[key].wasPressedThisFrame)
             {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.Log($"[UIPanelManager] Key '{key}' pressed -> toggle '{p.name}'");
+#if (UNITY_EDITOR || DEVELOPMENT_BUILD)
+                if (debugLogs) Debug.Log($"[UIPanelManager] Toggle key '{key}' -> '{p.name}'");
 #endif
                 Toggle(p);
             }
         }
     }
+
     public void Open(UIPanel panel)
     {
         if (panel == null) return;
-
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-    Debug.Log($"[UIPanelManager] Open '{panel.name}'\n{Environment.StackTrace}");
+#if (UNITY_EDITOR || DEVELOPMENT_BUILD)
+        if (debugLogs) Debug.Log($"[UIPanelManager] Open '{panel.name}'");
 #endif
 
         if (_groups.TryGetValue(panel.GroupId, out var set))
@@ -113,8 +112,8 @@ public class UIPanelManager : MonoBehaviour
                 var other = snapshot[i];
                 if (other && !ReferenceEquals(other, panel) && other.IsOpen)
                 {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                Debug.Log($"[UIPanelManager] Close sibling '{other.name}' (group '{panel.GroupId}')");
+#if (UNITY_EDITOR || DEVELOPMENT_BUILD)
+                    if (debugLogs) Debug.Log($"[UIPanelManager] Close sibling '{other.name}' (group '{panel.GroupId}')");
 #endif
                     other.InternalClose(invokeBackend: true);
                 }
@@ -123,11 +122,12 @@ public class UIPanelManager : MonoBehaviour
 
         panel.InternalOpen(invokeBackend: true);
     }
+
     public void Close(UIPanel panel)
     {
         if (panel == null) return;
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-    Debug.Log($"[UIPanelManager] Close '{panel.name}'\n{Environment.StackTrace}");
+#if (UNITY_EDITOR || DEVELOPMENT_BUILD)
+        if (debugLogs) Debug.Log($"[UIPanelManager] Close '{panel.name}'");
 #endif
         panel.InternalClose(invokeBackend: true);
     }
@@ -135,8 +135,8 @@ public class UIPanelManager : MonoBehaviour
     public void Toggle(UIPanel panel)
     {
         if (panel == null) return;
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-    Debug.Log($"[UIPanelManager] Toggle '{panel.name}' (isOpen={panel.IsOpen})\n{Environment.StackTrace}");
+#if (UNITY_EDITOR || DEVELOPMENT_BUILD)
+        if (debugLogs) Debug.Log($"[UIPanelManager] Toggle '{panel.name}' (isOpen={panel.IsOpen})");
 #endif
         if (panel.IsOpen) Close(panel);
         else Open(panel);
