@@ -1,7 +1,7 @@
 // Assets/Scripts/Equipment/EquipmentController.cs
 using System;
 using System.Collections.Generic;
-using System.Linq;            // for ToArray in RefreshUI()
+using System.Linq;            // only used in RefreshUI() log-safe repaint
 using UnityEngine;
 using UnityEngine.UI;
 using Game.Items;
@@ -28,10 +28,13 @@ public class EquipmentController : MonoBehaviour
     [SerializeField] private EquipmentSlotUI rightHand;
     [SerializeField] private EquipmentSlotUI leftHand;
 
+    [Header("Policies")]
+    [Tooltip("When both hands are occupied and hovering a 1H item, prefer comparing/replacing Right Hand.")]
+    [SerializeField] private bool preferRightHandOnTie = true;
+
     // Current equipped state (Definition-per-slot storage for now)
     private readonly Dictionary<EquipmentSlot, ItemDefinition> _equipped = new();
 
-    // ---- Tooltip/slots can subscribe to be notified when equipment changes ----
     public event Action EquippedChanged;
     private void RaiseEquippedChanged() => EquippedChanged?.Invoke();
 
@@ -52,11 +55,7 @@ public class EquipmentController : MonoBehaviour
         InitSlot(EquipmentSlot.LeftHand, leftHand, "LeftHand");
     }
 
-    private void OnEnable()
-    {
-        // If UI elements were rebuilt while disabled, this re-applies the visuals.
-        RefreshUI();
-    }
+    private void OnEnable() => RefreshUI();
 
     private void InitSlot(EquipmentSlot slot, EquipmentSlotUI ui, string label)
     {
@@ -77,7 +76,7 @@ public class EquipmentController : MonoBehaviour
 
         if (!EquipmentSlotMapper.TrySuggestSlot(def, out var primary, out var secondary))
         {
-            Debug.Log($"[Equip] No slot mapping for {def.displayName} ({def.subtype})");
+            Debug.Log($"[Equip] No slot mapping for {def?.displayName} ({def?.subtype})");
             return false;
         }
 
@@ -96,7 +95,7 @@ public class EquipmentController : MonoBehaviour
             return EquipIntoSlot(EquipmentSlot.RightHand, def);
         }
 
-        // One-handed weapon → prefer a free hand
+        // One-handed weapon → prefer a free hand, else suggested
         if (primary is EquipmentSlot.RightHand or EquipmentSlot.LeftHand)
         {
             var target = ChooseHandForOneHander(primary);
@@ -184,16 +183,13 @@ public class EquipmentController : MonoBehaviour
         _equipped[slot] = null;
 
         // Update just that slot immediately
-        GetUI(slot)?.ShowItem(null);
+        GetSlotUI(slot)?.ShowItem(null);
 
         Debug.Log($"[Equip] Unequipped {def.displayName} from {slot}.");
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
 
-        // Inform listeners (tooltips, slot binders, etc.)
         RaiseEquippedChanged();
-
-        // Defensive repaint in case any UI rebuilt this frame
         RefreshUI();
         return true;
     }
@@ -209,7 +205,7 @@ public class EquipmentController : MonoBehaviour
         _equipped[slot] = def;
 
         // Update the specific slot immediately
-        GetUI(slot)?.ShowItem(def);
+        GetSlotUI(slot)?.ShowItem(def);
 
         ApplyStatsOnEquip(def);
 
@@ -217,10 +213,7 @@ public class EquipmentController : MonoBehaviour
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
 
-        // Inform listeners (tooltips, slot binders, etc.)
         RaiseEquippedChanged();
-
-        // If any UI elements were rebuilt during the drag/drop, make sure all slot UIs match state.
         RefreshUI();
         DumpEquipped();
         return true;
@@ -231,7 +224,7 @@ public class EquipmentController : MonoBehaviour
     {
         foreach (var kv in _equipped.ToArray())
         {
-            var ui = GetUI(kv.Key);
+            var ui = GetSlotUI(kv.Key);
             if (ui) ui.ShowItem(kv.Value);
         }
 #if UNITY_EDITOR
@@ -246,7 +239,91 @@ public class EquipmentController : MonoBehaviour
             Debug.Log($"[Equip] SLOT {kv.Key} = {(kv.Value != null ? kv.Value.displayName : "NULL")}");
     }
 
-    private EquipmentSlotUI GetUI(EquipmentSlot slot) => slot switch
+    private EquipmentSlot ChooseHandForOneHander(EquipmentSlot suggested)
+    {
+        bool rightFree = !_equipped.TryGetValue(EquipmentSlot.RightHand, out var r) || r == null;
+        bool leftFree = !_equipped.TryGetValue(EquipmentSlot.LeftHand, out var l) || l == null;
+
+        if (rightFree) return EquipmentSlot.RightHand;
+        if (leftFree) return EquipmentSlot.LeftHand;
+        return suggested; // replace suggested if both busy
+    }
+
+    private bool MeetsRequirements(ItemDefinition def, out string reason)
+    {
+        reason = "";
+        if (!playerStats) return true;
+
+        if (playerStats.level < def.requirements.level)
+        {
+            reason = $"Level {def.requirements.level} required";
+            return false;
+        }
+        return true;
+    }
+
+    private void HighlightInvalidSlot(ItemDefinition def)
+    {
+        if (!EquipmentSlotMapper.TrySuggestSlot(def, out var primary, out _)) return;
+        var ui = GetSlotUI(primary);
+        if (!ui) return;
+
+        var img = ui.GetComponent<Image>();
+        if (!img) return;
+
+        Color orig = img.color;
+        img.color = new Color(1f, 0f, 0f, 0.35f);
+        StartCoroutine(RestoreSlotColor(img, orig, 0.35f));
+    }
+
+    private System.Collections.IEnumerator RestoreSlotColor(Image img, Color orig, float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        if (img) img.color = orig;
+    }
+
+    // -------- Stat aggregation for PlayerStats (existing logic) --------
+    private void ApplyStatsOnEquip(ItemDefinition def)
+    {
+        if (!playerStats) return;
+
+        if (def.category == ItemCategory.Weapon) playerStats.AddWeapon(def.baseDamage);
+
+        if (def.category == ItemCategory.Armor || def.subtype == ItemSubtype.Shield)
+        {
+            playerStats.AddArmor(def.baseDefense, def.baseMagicResist);
+            playerStats.AddOnKill(def.hpOnKill, def.manaOnKill);
+        }
+
+        if (def.subtype == ItemSubtype.Boots) playerStats.EquipBoots(1.2f);
+    }
+
+    private void ApplyStatsOnUnequip(ItemDefinition def)
+    {
+        if (!playerStats) return;
+
+        if (def.category == ItemCategory.Weapon) playerStats.RemoveWeapon(def.baseDamage);
+
+        if (def.category == ItemCategory.Armor || def.subtype == ItemSubtype.Shield)
+        {
+            playerStats.RemoveArmor(def.baseDefense, def.baseMagicResist);
+            playerStats.RemoveOnKill(def.hpOnKill, def.manaOnKill);
+        }
+
+        if (def.subtype == ItemSubtype.Boots) playerStats.UnequipBoots();
+    }
+
+    // ----------------------------------------------------------------------
+    // Public accessors for external scripts (tooltips, drag controller, etc.)
+    // ----------------------------------------------------------------------
+    public ItemDefinition GetEquipped(EquipmentSlot slot)
+        => _equipped.TryGetValue(slot, out var d) ? d : null;
+
+    public ItemDefinition GetEquippedDefinition(EquipmentSlot slot) => GetEquipped(slot);
+
+    public Game.Items.ItemInstance GetEquippedInstance(EquipmentSlot slot) => null;
+
+    public EquipmentSlotUI GetSlotUI(EquipmentSlot slot) => slot switch
     {
         EquipmentSlot.Helm => helm,
         EquipmentSlot.Gloves => gloves,
@@ -264,108 +341,190 @@ public class EquipmentController : MonoBehaviour
         _ => null
     };
 
-    private EquipmentSlot ChooseHandForOneHander(EquipmentSlot suggested)
+    public bool MeetsRequirementsPublic(ItemDefinition def) => MeetsRequirements(def, out _);
+
+    // =====================================================================
+    // --------- COMPARISON HELPERS (used by tooltip) ----------------------
+    // =====================================================================
+
+    // Read from the controller state only (no EquipmentSlotUI.CurrentDef needed).
+    public ItemDefinition GetRightHandDef() => GetEquipped(EquipmentSlot.RightHand);
+    public ItemDefinition GetLeftHandDef() => GetEquipped(EquipmentSlot.LeftHand);
+    public ItemDefinition GetRing1Def() => GetEquipped(EquipmentSlot.Ring1);
+    public ItemDefinition GetRing2Def() => GetEquipped(EquipmentSlot.Ring2);
+
+    private static readonly ItemDefinition[] EMPTY_DEFS = new ItemDefinition[0];
+    private readonly ItemDefinition[] _one = new ItemDefinition[1];
+    private readonly ItemDefinition[] _two = new ItemDefinition[2];
+    private readonly ItemDefinition[] _tmpTwoNonNull = new ItemDefinition[2];
+
+    /// <summary>
+    /// Resolves which slot(s) the hovered item would occupy and returns the currently
+    /// equipped definition(s) that form the baseline to compare against.
+    /// </summary>
+    public bool GetEquippedForComparison(
+        ItemDefinition hovered,
+        out EquipmentSlot resolvedSlot,
+        out ItemDefinition[] baselineDefs,
+        out string replacementNote
+    )
     {
-        bool rightFree = !_equipped.TryGetValue(EquipmentSlot.RightHand, out var r) || r == null;
-        bool leftFree = !_equipped.TryGetValue(EquipmentSlot.LeftHand, out var l) || l == null;
+        replacementNote = string.Empty;
+        baselineDefs = EMPTY_DEFS;
 
-        if (rightFree) return EquipmentSlot.RightHand;
-        if (leftFree) return EquipmentSlot.LeftHand;
-        return suggested; // replace suggested if both busy
-    }
-
-    private bool MeetsRequirements(ItemDefinition def, out string reason)
-    {
-        reason = "";
-        if (!playerStats) return true;
-
-        // Level
-        if (playerStats.level < def.requirements.level)
+        if (hovered == null)
         {
-            reason = $"Level {def.requirements.level} required";
+            resolvedSlot = EquipmentSlot.RightHand; // arbitrary safe default
             return false;
         }
 
-        // TODO: add STR/DEX/etc checks if/when you have them.
+        // Resolve mapping first so we always have a valid primary for resolvedSlot.
+        if (!EquipmentSlotMapper.TrySuggestSlot(hovered, out var primary, out var secondary))
+        {
+            resolvedSlot = EquipmentSlot.RightHand; // safe fallback
+            return false;
+        }
+
+        resolvedSlot = primary;
+
+        bool isWeapon =
+            primary == EquipmentSlot.RightHand || primary == EquipmentSlot.LeftHand ||
+            secondary == EquipmentSlot.RightHand || secondary == EquipmentSlot.LeftHand;
+
+        bool isRing = primary == EquipmentSlot.Ring1 || primary == EquipmentSlot.Ring2 || hovered.subtype == ItemSubtype.Ring;
+
+        // --- 2H weapon ---
+        if (hovered.grip == WeaponGrip.TwoHanded)
+        {
+            resolvedSlot = EquipmentSlot.RightHand; // install will occupy both hands
+            var r = GetRightHandDef();
+            var l = GetLeftHandDef();
+            if (r == null && l == null)
+            {
+                replacementNote = "Replacing: Empty";
+                baselineDefs = EMPTY_DEFS;
+            }
+            else
+            {
+                replacementNote = "Will occupy both hands.";
+                _two[0] = r;
+                _two[1] = l;
+                baselineDefs = CopyNonNull(_two, 2, _tmpTwoNonNull);
+            }
+            return true;
+        }
+
+        // --- 1H weapon ---
+        if (isWeapon && hovered.grip == WeaponGrip.OneHanded)
+        {
+            var right = GetRightHandDef();
+            var left = GetLeftHandDef();
+
+            if (right != null && left != null)
+            {
+                if (preferRightHandOnTie)
+                {
+                    resolvedSlot = EquipmentSlot.RightHand;
+                    replacementNote = "Replacing: Right Hand";
+                    _one[0] = right;
+                }
+                else
+                {
+                    resolvedSlot = EquipmentSlot.LeftHand;
+                    replacementNote = "Replacing: Left Hand";
+                    _one[0] = left;
+                }
+                baselineDefs = _one;
+            }
+            else if (right != null)
+            {
+                resolvedSlot = EquipmentSlot.RightHand;
+                replacementNote = "Replacing: Right Hand";
+                _one[0] = right;
+                baselineDefs = _one;
+            }
+            else if (left != null)
+            {
+                resolvedSlot = EquipmentSlot.LeftHand;
+                replacementNote = "Replacing: Left Hand";
+                _one[0] = left;
+                baselineDefs = _one;
+            }
+            else
+            {
+                resolvedSlot = preferRightHandOnTie ? EquipmentSlot.RightHand : EquipmentSlot.LeftHand;
+                replacementNote = "Replacing: Empty";
+                baselineDefs = EMPTY_DEFS;
+            }
+            return true;
+        }
+
+        // --- Rings (MVP: compare to Ring1; if Ring1 empty → Empty) ---
+        if (isRing)
+        {
+            var r1 = GetRing1Def();
+            resolvedSlot = EquipmentSlot.Ring1;
+            if (r1 == null)
+            {
+                replacementNote = "Replacing: Empty";
+                baselineDefs = EMPTY_DEFS;
+            }
+            else
+            {
+                replacementNote = "Replacing: Ring 1";
+                _one[0] = r1;
+                baselineDefs = _one;
+            }
+            return true;
+        }
+
+        // --- Generic single-slot armor/etc. ---
+        resolvedSlot = primary;
+        var current = GetEquipped(primary);
+        if (current == null)
+        {
+            replacementNote = "Replacing: Empty";
+            baselineDefs = EMPTY_DEFS;
+        }
+        else
+        {
+            replacementNote = $"Replacing: {primary}";
+            _one[0] = current;
+            baselineDefs = _one;
+        }
         return true;
     }
 
-    // -------- Visual: brief red flash used when generic equip fails --------
-    private void HighlightInvalidSlot(ItemDefinition def)
+    /// <summary>Aggregate minimal stats for comparison over multiple defs (no allocs on hot path).</summary>
+    public ItemStatsSnapshot GetCombinedStats(ItemDefinition[] defs)
     {
-        if (!EquipmentSlotMapper.TrySuggestSlot(def, out var primary, out _)) return;
-        var ui = GetUI(primary);
-        if (!ui) return;
-
-        var img = ui.GetComponent<Image>();
-        if (!img) return;
-
-        Color orig = img.color;
-        img.color = new Color(1f, 0f, 0f, 0.35f);
-        StartCoroutine(RestoreSlotColor(img, orig, 0.35f));
-    }
-
-    private System.Collections.IEnumerator RestoreSlotColor(Image img, Color orig, float delay)
-    {
-        yield return new WaitForSeconds(delay);
-        if (img) img.color = orig;
-    }
-
-    // -------- Stat aggregation --------
-    private void ApplyStatsOnEquip(ItemDefinition def)
-    {
-        if (!playerStats) return;
-
-        if (def.category == ItemCategory.Weapon) playerStats.AddWeapon(def.baseDamage);
-
-        if (def.category == ItemCategory.Armor)
+        var acc = ItemStatsSnapshot.Zero;
+        if (defs == null) return acc;
+        for (int i = 0; i < defs.Length; i++)
         {
-            playerStats.AddArmor(def.baseDefense, def.baseMagicResist);
-            playerStats.AddOnKill(def.hpOnKill, def.manaOnKill);
+            var d = defs[i];
+            if (d == null) continue;
+            acc = ItemStatsSnapshot.Sum(acc, ItemStatsSnapshot.From(d));
         }
-
-        if (def.subtype == ItemSubtype.Boots) playerStats.EquipBoots(1.2f);
+        return acc;
     }
 
-    private void ApplyStatsOnUnequip(ItemDefinition def)
+    private static ItemDefinition[] CopyNonNull(ItemDefinition[] src, int count, ItemDefinition[] dst)
     {
-        if (!playerStats) return;
-
-        if (def.category == ItemCategory.Weapon) playerStats.RemoveWeapon(def.baseDamage);
-
-        if (def.category == ItemCategory.Armor)
+        int j = 0;
+        for (int i = 0; i < count; i++)
         {
-            playerStats.RemoveArmor(def.baseDefense, def.baseMagicResist);
-            playerStats.RemoveOnKill(def.hpOnKill, def.manaOnKill);
+            var d = src[i];
+            if (d != null) dst[j++] = d;
         }
-
-        if (def.subtype == ItemSubtype.Boots) playerStats.UnequipBoots();
+        if (j == 0) return new ItemDefinition[0];
+        if (j == 1) { dst[1] = null; } // ensure clean
+        return dst;
     }
 
-    // ----------------------------------------------------------------------
-    // Public accessors for external scripts (tooltips, drag controller, etc.)
-    // ----------------------------------------------------------------------
-    public ItemDefinition GetEquipped(EquipmentSlot slot)
-    {
-        return _equipped.TryGetValue(slot, out var d) ? d : null;
-    }
-
-    /// <summary>
-    /// If in future you store real instances per slot, return them here.
-    /// For now, return null so tooltip binder creates a temporary ItemInstance from definition.
-    /// </summary>
-    public Game.Items.ItemInstance GetEquippedInstance(EquipmentSlot slot)
-    {
-        return null;
-    }
-
-    /// <summary>Current equipped definition in a slot (null if empty).</summary>
-    public ItemDefinition GetEquippedDefinition(EquipmentSlot slot)
-    {
-        return GetEquipped(slot);
-    }
-
-    /// <summary>Move the equipped item from one slot to another without passing through the inventory.</summary>
+    // ------------------------------------------------------------------
+    // MoveEquip: needed by InventoryDragController (you referenced it)
+    // ------------------------------------------------------------------
     public bool MoveEquip(EquipmentSlot from, EquipmentSlot to)
     {
         if (from == to) return true;
@@ -386,8 +545,8 @@ public class EquipmentController : MonoBehaviour
             to = EquipmentSlot.RightHand;
             _equipped[EquipmentSlot.LeftHand] = null;
             _equipped[EquipmentSlot.RightHand] = def;
-            GetUI(EquipmentSlot.LeftHand)?.ShowItem(null);
-            GetUI(EquipmentSlot.RightHand)?.ShowItem(def);
+            GetSlotUI(EquipmentSlot.LeftHand)?.ShowItem(null);
+            GetSlotUI(EquipmentSlot.RightHand)?.ShowItem(def);
         }
         else
         {
@@ -398,46 +557,15 @@ public class EquipmentController : MonoBehaviour
             _equipped[from] = null;
             _equipped[to] = def;
 
-            GetUI(from)?.ShowItem(null);
-            GetUI(to)?.ShowItem(def);
+            GetSlotUI(from)?.ShowItem(null);
+            GetSlotUI(to)?.ShowItem(def);
         }
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
 
-        // Inform listeners
         RaiseEquippedChanged();
-
         RefreshUI();
         DumpEquipped();
         return true;
-    }
-
-    // ----------------------------------------------------------------------
-    // Public accessor for external scripts (like InventoryDragController)
-    // ----------------------------------------------------------------------
-    public EquipmentSlotUI GetSlotUI(EquipmentSlot slot)
-    {
-        return slot switch
-        {
-            EquipmentSlot.Helm => helm,
-            EquipmentSlot.Gloves => gloves,
-            EquipmentSlot.Armor => armor,
-            EquipmentSlot.Pants => pants,
-            EquipmentSlot.Boots => boots,
-            EquipmentSlot.Amulet => amulet,
-            EquipmentSlot.Ring1 => ring1,
-            EquipmentSlot.Ring2 => ring2,
-            EquipmentSlot.Pet => pet,
-            EquipmentSlot.Orb => orb,
-            EquipmentSlot.Wings => wings,
-            EquipmentSlot.RightHand => rightHand,
-            EquipmentSlot.LeftHand => leftHand,
-            _ => null
-        };
-    }
-
-    public bool MeetsRequirementsPublic(ItemDefinition def)
-    {
-        return MeetsRequirements(def, out _);
     }
 }

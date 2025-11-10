@@ -1,3 +1,4 @@
+// Assets\Scripts\Items\ItemInstance.cs
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -63,6 +64,10 @@ namespace Game.Items
             if (!isBlessed) yield break;
             // Example placeholder: later you can branch by def.category/subtype.
             yield return "<b>Blessed</b>: +5% all stats, +10% durability loss resistance";
+        }
+        public static ItemInstance FromDefinition(ItemDefinition def, ItemTier? forceTier = null)
+        {
+            return new ItemInstance(def, forceTier);
         }
 
         public IEnumerable<string> SocketLines()

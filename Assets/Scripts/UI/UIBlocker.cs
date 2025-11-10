@@ -14,6 +14,41 @@ using UnityEngine.InputSystem;
 [DisallowMultipleComponent]
 public class UIBlocker : MonoBehaviour
 {
+    // ---------------- Logging control ----------------
+    [Header("Logging")]
+    [Tooltip("If true, this component will print logs (unless Use Global Logging is also true and the global switch is off).")]
+    [SerializeField] private bool enableLogs = false;
+
+    [Tooltip("If true, this instance follows the global logging switch set via UIBlocker.SetGlobalLogging().")]
+    [SerializeField] private bool useGlobalLogging = false;
+
+    private static bool s_globalLogging = false; // master switch for all UIBlockers
+
+    /// <summary>Enable/disable logs for all UIBlocker instances that use global logging.</summary>
+    public static void SetGlobalLogging(bool on) => s_globalLogging = on;
+
+    private bool ShouldLog =>
+        useGlobalLogging ? s_globalLogging : enableLogs;
+
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    private void Log(string msg)
+    {
+        if (ShouldLog) Debug.Log(msg, this);
+    }
+
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    private void LogWarn(string msg)
+    {
+        if (ShouldLog) Debug.LogWarning(msg, this);
+    }
+
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    private void LogError(string msg)
+    {
+        if (ShouldLog) Debug.LogError(msg, this);
+    }
+
+    // ---------------- Config ----------------
     [Header("Guard")]
     [Tooltip("If true, push the UiInputGuard on OnEnable and pop on OnDisable/OnDestroy.")]
     [SerializeField] private bool pushGuardOnEnable = true;
@@ -57,6 +92,7 @@ public class UIBlocker : MonoBehaviour
         }
 
         CacheActions();
+        Log("[UIBlocker] Awake → actions cached.");
     }
 
     private void OnEnable()
@@ -68,6 +104,8 @@ public class UIBlocker : MonoBehaviour
         SetBehavioursEnabled(false);
 
         if (manageCursor) RememberAndShowCursor();
+
+        Log("[UIBlocker] OnEnable complete.");
     }
 
     private void OnDisable()
@@ -80,6 +118,8 @@ public class UIBlocker : MonoBehaviour
         SwitchToGameplayMap();
 
         if (pushGuardOnEnable) PopGuard();
+
+        Log("[UIBlocker] OnDisable complete.");
     }
 
     private void OnDestroy()
@@ -94,8 +134,17 @@ public class UIBlocker : MonoBehaviour
             SwitchToGameplayMap();
 
             PopGuard();
+            LogWarn("[UIBlocker] Destroyed while pushed; performed safety revert.");
         }
     }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        // Keep the cached actions fresh in editor when fields change
+        CacheActions();
+    }
+#endif
 
     // ---------- Guard ----------
     private void PushGuard()
@@ -103,6 +152,7 @@ public class UIBlocker : MonoBehaviour
         if (_pushed) return;
         UiInputGuard.Push(this);
         _pushed = true;
+        Log("[UIBlocker] Pushed UiInputGuard.");
     }
 
     private void PopGuard()
@@ -110,6 +160,7 @@ public class UIBlocker : MonoBehaviour
         if (!_pushed) return;
         UiInputGuard.Pop(this);
         _pushed = false;
+        Log("[UIBlocker] Popped UiInputGuard.");
     }
 
     // ---------- PlayerInput maps ----------
@@ -120,7 +171,11 @@ public class UIBlocker : MonoBehaviour
         if (map != null)
         {
             playerInput.SwitchCurrentActionMap(uiActionMap);
-            Debug.Log($"[UIBlocker] Switched PlayerInput map -> '{uiActionMap}'");
+            Log($"[UIBlocker] Switched PlayerInput map → '{uiActionMap}'");
+        }
+        else
+        {
+            LogWarn($"[UIBlocker] UI action map '{uiActionMap}' not found.");
         }
     }
 
@@ -131,7 +186,11 @@ public class UIBlocker : MonoBehaviour
         if (map != null)
         {
             playerInput.SwitchCurrentActionMap(gameplayActionMap);
-            Debug.Log($"[UIBlocker] Restored PlayerInput map -> '{gameplayActionMap}'");
+            Log($"[UIBlocker] Restored PlayerInput map → '{gameplayActionMap}'");
+        }
+        else
+        {
+            LogWarn($"[UIBlocker] Gameplay action map '{gameplayActionMap}' not found.");
         }
     }
 
@@ -146,6 +205,7 @@ public class UIBlocker : MonoBehaviour
             if (string.IsNullOrWhiteSpace(name)) continue;
             var act = playerInput.actions.FindAction(name);
             if (act != null) _cachedActions.Add(act);
+            else LogWarn($"[UIBlocker] Action '{name}' not found in PlayerInput.");
         }
     }
 
@@ -154,8 +214,8 @@ public class UIBlocker : MonoBehaviour
         if (_cachedActions.Count == 0) return;
         foreach (var act in _cachedActions)
         {
-            if (disable) { act.Disable(); Debug.Log($"[UIBlocker] Disabled action '{act.name}'"); }
-            else { act.Enable(); Debug.Log($"[UIBlocker] Enabled action '{act.name}'"); }
+            if (disable) { act.Disable(); Log($"[UIBlocker] Disabled action '{act.name}'"); }
+            else { act.Enable(); Log($"[UIBlocker] Enabled action '{act.name}'"); }
         }
     }
 
@@ -168,6 +228,7 @@ public class UIBlocker : MonoBehaviour
             if (!b) continue;
             b.enabled = enabled;
         }
+        Log($"[UIBlocker] Behaviours set enabled = {enabled}");
     }
 
     // ---------- Cursor ----------
@@ -178,11 +239,13 @@ public class UIBlocker : MonoBehaviour
 
         Cursor.visible = true;
         Cursor.lockState = CursorLockMode.None;
+        Log("[UIBlocker] Cursor unlocked + visible.");
     }
 
     private void RestoreCursor()
     {
         Cursor.visible = _cursorPrevVisible;
         Cursor.lockState = _cursorPrevLock;
+        Log("[UIBlocker] Cursor restored.");
     }
 }

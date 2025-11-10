@@ -16,8 +16,10 @@ public class TooltipAnchorBeside : MonoBehaviour
         ByAvailableSpace // ignore prefer; pick the side with more free space
     }
 
-    [Header("Debug")]
-    public bool debug = true;
+    [Header("Debugging")]
+    [SerializeField] private bool enableLogs = false; // replaces old 'debug'
+    private string _tag => "Anchor";
+
     [Header("Behavior")]
     public HMode hMode = HMode.PreferThenFit;
     public HPrefer prefer = HPrefer.RightThenLeft;
@@ -89,16 +91,15 @@ public class TooltipAnchorBeside : MonoBehaviour
     public void Attach(RectTransform target)
     {
         _target = target;
-        if (debug) Debug.Log($"[TooltipAnchorBeside] Attach target='{_target?.name}'");
+        UITooltipDebug.Log(enableLogs, this, _tag, $"Attach target='{_target?.name}'");
         RepositionNow();
     }
 
     public void Detach()
     {
-        if (debug) Debug.Log("[TooltipAnchorBeside] Detach target");
+        UITooltipDebug.Log(enableLogs, this, _tag, "Detach target");
         _target = null;
     }
-
     public void PlaceBeside(RectTransform target)
     {
         Attach(target);
@@ -109,22 +110,16 @@ public class TooltipAnchorBeside : MonoBehaviour
     {
         if (!_target || !_clampCanvasRect || !rect || !canvas) return;
 
-        // Make sure sizes are up to date
         Canvas.ForceUpdateCanvases();
         LayoutRebuilder.ForceRebuildLayoutImmediate(rect);
 
-        // Preferred/actual size of the tooltip
         Vector2 pref = new(
             Mathf.Max(1f, LayoutUtility.GetPreferredSize(rect, 0)),
             Mathf.Max(1f, LayoutUtility.GetPreferredSize(rect, 1))
         );
         Vector2 actual = rect.rect.size;
-        Vector2 tipSize = new(
-            Mathf.Max(pref.x, actual.x),
-            Mathf.Max(pref.y, actual.y)
-        );
+        Vector2 tipSize = new(Mathf.Max(pref.x, actual.x), Mathf.Max(pref.y, actual.y));
 
-        // Target rect in the clamp canvas' local space
         Rect clampCanvasRect = _clampCanvasRect.rect;
         Rect targetRectInClamp = GetTargetRectInCanvasSpace(
             _target, _clampCanvasRect, _clampCanvasRect.GetComponent<Canvas>());
@@ -141,31 +136,20 @@ public class TooltipAnchorBeside : MonoBehaviour
         float minX = clampCanvasRect.xMin + padX;
         float maxX = clampCanvasRect.xMax - padX - tipSize.x;
 
-        // how much free space there is on each side (for logging and ByAvailableSpace mode)
         float spaceLeft = (left - clampCanvasRect.xMin) - padX;
         float spaceRight = (clampCanvasRect.xMax - right) - padX;
 
-        if (debug)
-        {
-            var cc = clampCanvasOverride ? clampCanvasOverride : (canvas ? canvas.rootCanvas : null);
-            Debug.Log(
-                "[TooltipAnchorBeside] BEGIN\n" +
-                $"  clampCanvas='{cc?.name}' renderMode={cc?.renderMode} cam={(cc && cc.renderMode != RenderMode.ScreenSpaceOverlay ? cc.worldCamera?.name : "null")}\n" +
-                $"  hMode={hMode} prefer={prefer} gapX={gapX} pad=({clampPadding.x:0.00}, {clampPadding.y:0.00}) vAlign={verticalAlign}\n" +
-                $"  tipPref=({pref.x:0.00}, {pref.y:0.00}) tipActual=({actual.x:0.00}, {actual.y:0.00}) tipUsed=({tipSize.x:0.00}, {tipSize.y:0.00})\n" +
-                $"  target='{_target?.name}' rectInClamp=({left:0.0},{bottom:0.0})–({right:0.0},{top:0.0}) size=({right - left:0.0},{top - bottom:0.0})\n" +
-                $"  clampRect={_clampCanvasRect.rect} spaceLeft={spaceLeft:0.0} spaceRight={spaceRight:0.0}"
-            );
-        }
+        UITooltipDebug.Log(enableLogs, this, _tag,
+            $"BEGIN tip=({tipSize.x:0},{tipSize.y:0}) target=({left:0},{bottom:0})–({right:0},{top:0}) " +
+            $"spaceL={spaceLeft:0} spaceR={spaceRight:0} prefer={prefer} mode={hMode}");
 
-        // Helpers
         float AlignY(float t, float b, float m, float h)
         {
             return verticalAlign switch
             {
-                VAlign.Top => t - h - gapY,   // place tooltip ABOVE the target’s top
-                VAlign.Bottom => b + gapY,       // place tooltip BELOW the target’s bottom
-                _ => m - h * 0.5f    // centered
+                VAlign.Top => t - h - gapY,
+                VAlign.Bottom => b + gapY,
+                _ => m - h * 0.5f
             };
         }
 
@@ -173,7 +157,6 @@ public class TooltipAnchorBeside : MonoBehaviour
         {
             float x = right + gapX;
             float y = AlignY(top, bottom, midY, tipSize.y);
-            // Clamp inside vertical range; horizontal check is done by FitsRight()
             float minY = clampCanvasRect.yMin + padY;
             float maxY = clampCanvasRect.yMax - padY - tipSize.y;
             y = Mathf.Clamp(y, minY, maxY);
@@ -193,8 +176,8 @@ public class TooltipAnchorBeside : MonoBehaviour
         bool FitsRight()
         {
             float x = right + gapX;
-            bool fits = x <= maxX + 0.0001f; // tiny epsilon
-            if (debug) Debug.Log($"[TooltipAnchorBeside] FitsRight={fits} (x={x:0.0}, maxX={maxX:0.0})");
+            bool fits = x <= maxX + 0.0001f;
+            UITooltipDebug.Log(enableLogs, this, _tag, $"FitsRight={fits} (x={x:0.0}, maxX={maxX:0.0})");
             return fits;
         }
 
@@ -202,66 +185,65 @@ public class TooltipAnchorBeside : MonoBehaviour
         {
             float x = left - gapX - tipSize.x;
             bool fits = x >= minX - 0.0001f;
-            if (debug) Debug.Log($"[TooltipAnchorBeside] FitsLeft={fits} (x={x:0.0}, minX={minX:0.0})");
+            UITooltipDebug.Log(enableLogs, this, _tag, $"FitsLeft={fits} (x={x:0.0}, minX={minX:0.0})");
             return fits;
         }
 
         Vector2 pos;
 
-        if (debug)
-        {
-            Debug.Log($"[TAB] clampRect mins/maxs: min=({_clampCanvasRect.rect.xMin:0.0},{_clampCanvasRect.rect.yMin:0.0}) " +
-                      $"max=({_clampCanvasRect.rect.xMax:0.0},{_clampCanvasRect.rect.yMax:0.0}) " +
-                      $"size=({_clampCanvasRect.rect.width:0.0},{_clampCanvasRect.rect.height:0.0})");
-            Debug.Log($"[TAB] target L/R/T/B: {left:0.0}/{right:0.0}/{top:0.0}/{bottom:0.0} midY={midY:0.0} " +
-                      $"minX={minX:0.0} maxX={maxX:0.0}");
-        }
+        UITooltipDebug.Log(enableLogs, this, _tag,
+            $"[TAB] clampRect size=({clampCanvasRect.width:0.0},{clampCanvasRect.height:0.0}) " +
+            $"min=({clampCanvasRect.xMin:0.0},{clampCanvasRect.yMin:0.0}) " +
+            $"max=({clampCanvasRect.xMax:0.0},{clampCanvasRect.yMax:0.0})");
+        UITooltipDebug.Log(enableLogs, this, _tag,
+            $"[TAB] target L/R/T/B: {left:0.0}/{right:0.0}/{top:0.0}/{bottom:0.0} midY={midY:0.0} " +
+            $"minX={minX:0.0} maxX={maxX:0.0}");
+
         if (hMode == HMode.PreferThenFit)
         {
-            // Try preferred side first
             if (prefer == HPrefer.RightThenLeft)
             {
-                if (FitsRight()) { pos = PlaceRight(); if (debug) Debug.Log("[TooltipAnchorBeside] PreferThenFit → using Right"); }
-                else if (FitsLeft()) { pos = PlaceLeft(); if (debug) Debug.Log("[TooltipAnchorBeside] PreferThenFit → Right fails, using Left"); }
-                else { pos = PlaceRight(); if (debug) Debug.Log("[TooltipAnchorBeside] PreferThenFit → neither fits, clamped Right"); }
+                if (FitsRight()) { pos = PlaceRight(); UITooltipDebug.Log(enableLogs, this, _tag, "PreferThenFit → using Right"); }
+                else if (FitsLeft()) { pos = PlaceLeft(); UITooltipDebug.Log(enableLogs, this, _tag, "PreferThenFit → Right fails, using Left"); }
+                else { pos = PlaceRight(); UITooltipDebug.Log(enableLogs, this, _tag, "PreferThenFit → neither fits, clamped Right"); }
             }
-            else // LeftThenRight
+            else
             {
-                if (FitsLeft()) { pos = PlaceLeft(); if (debug) Debug.Log("[TooltipAnchorBeside] PreferThenFit → using Left"); }
-                else if (FitsRight()) { pos = PlaceRight(); if (debug) Debug.Log("[TooltipAnchorBeside] PreferThenFit → Left fails, using Right"); }
-                else { pos = PlaceLeft(); if (debug) Debug.Log("[TooltipAnchorBeside] PreferThenFit → neither fits, clamped Left"); }
+                if (FitsLeft()) { pos = PlaceLeft(); UITooltipDebug.Log(enableLogs, this, _tag, "PreferThenFit → using Left"); }
+                else if (FitsRight()) { pos = PlaceRight(); UITooltipDebug.Log(enableLogs, this, _tag, "PreferThenFit → Left fails, using Right"); }
+                else { pos = PlaceLeft(); UITooltipDebug.Log(enableLogs, this, _tag, "PreferThenFit → neither fits, clamped Left"); }
             }
         }
         else // ByAvailableSpace
         {
-            bool rightFirst = spaceRight >= spaceLeft; // ← correct comparison & meaning
-            if (debug) Debug.Log($"[TooltipAnchorBeside] Mode=ByAvailableSpace → rightFirst={rightFirst} (spaceR={spaceRight:0.0} vs spaceL={spaceLeft:0.0})");
+            bool rightFirst = spaceRight >= spaceLeft;
+            UITooltipDebug.Log(enableLogs, this, _tag,
+                $"Mode=ByAvailableSpace → rightFirst={rightFirst} (spaceR={spaceRight:0.0} vs spaceL={spaceLeft:0.0})");
 
             if (rightFirst)
             {
-                if (FitsRight()) { pos = PlaceRight(); if (debug) Debug.Log("[TooltipAnchorBeside] ByAvailableSpace → using Right"); }
-                else if (FitsLeft()) { pos = PlaceLeft(); if (debug) Debug.Log("[TooltipAnchorBeside] ByAvailableSpace → Right fails, using Left"); }
-                else { pos = PlaceRight(); if (debug) Debug.Log("[TooltipAnchorBeside] ByAvailableSpace → neither fits, clamped Right"); }
+                if (FitsRight()) { pos = PlaceRight(); UITooltipDebug.Log(enableLogs, this, _tag, "ByAvailableSpace → using Right"); }
+                else if (FitsLeft()) { pos = PlaceLeft(); UITooltipDebug.Log(enableLogs, this, _tag, "ByAvailableSpace → Right fails, using Left"); }
+                else { pos = PlaceRight(); UITooltipDebug.Log(enableLogs, this, _tag, "ByAvailableSpace → neither fits, clamped Right"); }
             }
             else
             {
-                if (FitsLeft()) { pos = PlaceLeft(); if (debug) Debug.Log("[TooltipAnchorBeside] ByAvailableSpace → using Left"); }
-                else if (FitsRight()) { pos = PlaceRight(); if (debug) Debug.Log("[TooltipAnchorBeside] ByAvailableSpace → Left fails, using Right"); }
-                else { pos = PlaceLeft(); if (debug) Debug.Log("[TooltipAnchorBeside] ByAvailableSpace → neither fits, clamped Left"); }
+                if (FitsLeft()) { pos = PlaceLeft(); UITooltipDebug.Log(enableLogs, this, _tag, "ByAvailableSpace → using Left"); }
+                else if (FitsRight()) { pos = PlaceRight(); UITooltipDebug.Log(enableLogs, this, _tag, "ByAvailableSpace → Left fails, using Right"); }
+                else { pos = PlaceLeft(); UITooltipDebug.Log(enableLogs, this, _tag, "ByAvailableSpace → neither fits, clamped Left"); }
             }
         }
 
-        // Convert from canvas local coords (center-origin) to anchoredPosition relative to top-left anchor
+        // final position (single assignment)
         Vector2 topLeft = new Vector2(_clampCanvasRect.rect.xMin, _clampCanvasRect.rect.yMax);
         Vector2 anchored = (pos - topLeft) + nudge;
         rect.anchoredPosition = anchored;
 
-        if (debug)
-        {
-            Debug.Log($"[TooltipAnchorBeside] anchor/pivot={rect.anchorMin}..{rect.anchorMax} pivot={rect.pivot} " +
-                      $"topLeft={topLeft} pos(centerSpace)={pos} → anchored(topLeftSpace)={anchored}");
-        }
+        UITooltipDebug.Log(enableLogs, this, _tag,
+            $"anchor/pivot={rect.anchorMin}..{rect.anchorMax} pivot={rect.pivot} " +
+            $"topLeft={topLeft} pos(centerSpace)={pos} → anchored(topLeftSpace)={anchored}");
     }
+
 
     // ---------------- helpers ----------------
     private static Rect GetTargetRectInCanvasSpace(RectTransform target, RectTransform canvasRect, Canvas clampCanvas)

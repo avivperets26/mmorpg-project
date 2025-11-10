@@ -9,25 +9,27 @@ using Game.Items;
 public class EquipmentSlotUI : MonoBehaviour, IPointerClickHandler
 {
     [Header("Wiring")]
-    [SerializeField] private Image frame;            // optional decorative frame
-    [SerializeField] private TMP_Text label;         // fallback text (Helm, RightHand, ...)
-    [SerializeField] private Image icon;             // optional 2D sprite (rarely used now)
-    [SerializeField] private RawImage previewRaw;    // NEW: 3D preview (fill the slot rect)
-    [SerializeField] private InventoryDragController dragCtrl; // NEW: to start drags from equipment
+    [SerializeField] private Image frame;
+    [SerializeField] private TMP_Text label;
+    [SerializeField] private Image icon;
+    [SerializeField] private RawImage previewRaw;
+    [SerializeField] private InventoryDragController dragCtrl;
+
+    // NEW: the hover script on the Preview object (or whatever child handles equipped hover)
+    [SerializeField] private EquipmentSlotTooltip equippedTooltip;   // <—
 
     private EquipmentSlot _slot;
     public EquipmentSlot Slot => _slot;
 
     private EquipmentController _ctrl;
-    private ItemDefinition _current;                 // cache what we’re showing
-    private bool _hiddenForDrag = false; // <— NEW
+    private ItemDefinition _current;
+    private bool _hiddenForDrag = false;
 
     public void Init(EquipmentSlot slot, EquipmentController controller)
     {
         _slot = slot;
         _ctrl = controller;
 
-        // Safety: create a RawImage if not wired
         if (!previewRaw)
         {
             var riGo = new GameObject("Preview", typeof(RectTransform), typeof(RawImage));
@@ -38,10 +40,14 @@ public class EquipmentSlotUI : MonoBehaviour, IPointerClickHandler
             rt.offsetMin = Vector2.zero;
             rt.offsetMax = Vector2.zero;
             previewRaw = riGo.GetComponent<RawImage>();
-            previewRaw.raycastTarget = true; // needs to receive clicks
+            previewRaw.raycastTarget = true;
             previewRaw.texture = null;
-            previewRaw.color = new Color(1, 1, 1, 0);   // hidden when empty
+            previewRaw.color = new Color(1, 1, 1, 0);
         }
+
+        // Auto-find the equipped tooltip on the Preview child if not wired
+        if (!equippedTooltip)
+            equippedTooltip = previewRaw.GetComponent<EquipmentSlotTooltip>();
     }
 
     public void SetPlaceholder(string text)
@@ -50,6 +56,9 @@ public class EquipmentSlotUI : MonoBehaviour, IPointerClickHandler
         if (icon) icon.enabled = false;
         if (previewRaw) { previewRaw.texture = null; previewRaw.color = new Color(1, 1, 1, 0); }
         _current = null;
+
+        // clear equipped hover item
+        if (equippedTooltip) equippedTooltip.SetItem(null);   // <—
     }
 
     public void ShowItem(ItemDefinition def)
@@ -65,7 +74,10 @@ public class EquipmentSlotUI : MonoBehaviour, IPointerClickHandler
         {
             previewRaw.texture = null;
             previewRaw.color = new Color(1, 1, 1, 0);
-            // keep enabled as-is (empty state is fine)
+            if (equippedTooltip) equippedTooltip.SetItem(null);    // <—
+#if UNITY_EDITOR
+            Debug.Log($"[SlotUI] ShowItem slot={_slot} → label='{label?.text}', RT=(0x0)");
+#endif
             return;
         }
 
@@ -77,11 +89,13 @@ public class EquipmentSlotUI : MonoBehaviour, IPointerClickHandler
         previewRaw.texture = rt;
         previewRaw.color = Color.white;
 
-        // ✅ Ensure visible in case it was hidden during drag
+        // keep hover script in sync with the actual equipped item
+        if (equippedTooltip) equippedTooltip.SetItem(ItemInstance.FromDefinition(def));  // <—
+
         previewRaw.enabled = !_hiddenForDrag;
 
 #if UNITY_EDITOR
-    Debug.Log($"[SlotUI] ShowItem slot={_slot} → label='{label?.text}', RT=({rtW}x{rtH})");
+        Debug.Log($"[SlotUI] ShowItem slot={_slot} → label='{label?.text}', RT=({rtW}x{rtH})");
 #endif
     }
 

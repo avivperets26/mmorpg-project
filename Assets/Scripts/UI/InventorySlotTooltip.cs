@@ -1,3 +1,4 @@
+// Assets/Scripts/UI/InventorySlotTooltip.cs
 using UnityEngine;
 using UnityEngine.EventSystems;
 using Game.Items;
@@ -8,62 +9,69 @@ public class InventorySlotTooltip : MonoBehaviour,
 {
     public ItemInstance itemInstance;
     [SerializeField] private ItemTooltipUI tooltip;
+    [SerializeField] private TooltipCompareOrchestrator orchestrator;
+
     public RectTransform targetOverride;
+
+    [Header("Debugging")]
+    [SerializeField] private bool enableLogs = false;
+    private string _tag => "InventorySlot";
 
     void Awake()
     {
-        // Prefer the closest tooltip in our canvas; fallback to a global search (including inactive)
-        if (!tooltip)
+        if (!orchestrator)
         {
-            var canvas = GetComponentInParent<Canvas>(true);
-            if (canvas)
-                tooltip = canvas.GetComponentInChildren<ItemTooltipUI>(true);
-
-            if (!tooltip)
+            var inParent = GetComponentInParent<TooltipCompareOrchestrator>(true);
+            if (inParent) orchestrator = inParent;
+            else
+            {
 #if UNITY_2023_1_OR_NEWER
-                tooltip = Object.FindFirstObjectByType<ItemTooltipUI>(FindObjectsInactive.Include);
+                orchestrator = Object.FindFirstObjectByType<TooltipCompareOrchestrator>(FindObjectsInactive.Include);
 #else
-                tooltip = Object.FindObjectOfType<ItemTooltipUI>(true);
+                orchestrator = Object.FindObjectOfType<TooltipCompareOrchestrator>(true);
 #endif
+            }
         }
     }
 
     void OnEnable()
     {
-        // If the cursor is already over this slot when it appears, synthesize an enter.
         TryShowIfMouseIsOnMe();
+        UITooltipDebug.Log(enableLogs, this, _tag, "OnEnable() -> TryShowIfMouseIsOnMe()");
     }
 
     void OnDisable()
     {
-        // Only the slot that owns the tooltip is allowed to hide it
         if (tooltip) tooltip.HideOwner(this);
+        UITooltipDebug.Log(enableLogs, this, _tag, "OnDisable() -> HideOwner");
     }
 
     public void OnPointerEnter(PointerEventData e)
     {
-        // hard guard: no tooltip for empty slots
-        if (tooltip == null || itemInstance == null || itemInstance.def == null)
-            return;
-
+        if (orchestrator == null || itemInstance == null || itemInstance.def == null) return;
         var target = targetOverride ? targetOverride : (RectTransform)transform;
-        tooltip.ShowFrom(this, itemInstance, target);
+        UITooltipDebug.Log(enableLogs, this, _tag, $"Enter '{gameObject.name}' item='{itemInstance.def.displayName}'");
+        orchestrator.ShowForInventory(itemInstance, target);
     }
 
     public void OnPointerExit(PointerEventData e)
     {
-        if (tooltip) tooltip.HideOwner(this);
+        if (orchestrator) { orchestrator.HideBoth(); }
+        UITooltipDebug.Log(enableLogs, this, _tag, "Exit -> HideBoth()");
     }
 
     public void OnPointerDown(PointerEventData e)
     {
         if (tooltip) tooltip.HideOwner(this);
+        UITooltipDebug.Log(enableLogs, this, _tag, "PointerDown -> HideOwner()");
     }
 
     public void OnBeginDrag(PointerEventData e)
     {
         if (tooltip) tooltip.HideOwner(this);
+        UITooltipDebug.Log(enableLogs, this, _tag, "BeginDrag -> HideOwner()");
     }
+
 
     // ---- helper ----
     private void TryShowIfMouseIsOnMe()

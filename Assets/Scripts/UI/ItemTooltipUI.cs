@@ -8,6 +8,9 @@ using Game.Items;
 [DisallowMultipleComponent]
 public class ItemTooltipUI : MonoBehaviour
 {
+    [Header("Debugging")]
+    [SerializeField] private bool enableLogs = false;
+
     [Header("Wiring")]
     [SerializeField] private TMP_Text title;
     [SerializeField] private TMP_Text subtitleRarity;
@@ -16,37 +19,112 @@ public class ItemTooltipUI : MonoBehaviour
     [SerializeField] private GameObject linePrefab;         // optional (TMP_Text)
     [SerializeField] private TooltipAnchorBeside anchor;
 
+    [Header("Badge")]
+    [SerializeField] private TMP_Text statusBadge;          // assign the top-right TMP here
+
     [Header("Style")]
     [SerializeField] private Color blessedColor = new(1f, 0.9f, 0.3f);
     [SerializeField] private Color labelGrey = new(0.75f, 0.75f, 0.75f);
+    [SerializeField] private Color badgeEquipped = new(0.95f, 0.85f, 0.25f);
+    [SerializeField] private Color badgeInventory = new(0.65f, 0.9f, 1f);
 
     [Header("Fade")]
     [SerializeField] private float fadeDuration = 0.2f;
     [SerializeField] private AnimationCurve fadeCurve = null; // set in Inspector (defaults to linear if null)
 
+
+    private string _tag => "ItemTooltip";
     private CanvasGroup _cg;
     private InventorySlotTooltip _owner;
     private Coroutine _fadeCo;
     private PlayerStats _playerStatsForTooltip;
+    private EquipmentController _equipment; // cached for future needs
 
+    // Inline-comparison state (only used when context == Inventory)
+    private bool _inlineCompareEnabled = false;
+    private ItemStatsSnapshot _baseline; // valid only when _inlineCompareEnabled
+
+    // Colors for inline deltas (HTML, used via TMP rich text)
+    private const string COL_POS = "#6EEB83";
+    private const string COL_NEG = "#FF6B6B";
+    private const string COL_NEU = "#A0A0A0";
+
+    private TooltipContext _context = TooltipContext.Inventory;
 
     void Awake()
     {
         _cg = GetComponent<CanvasGroup>();
         if (!_cg) _cg = gameObject.AddComponent<CanvasGroup>();
 
-        // Keep GO ACTIVE at all times; visibility via alpha
         _cg.alpha = 0f;               // hidden by default
         _cg.interactable = false;     // tooltip never blocks input
         _cg.blocksRaycasts = false;
+
+        // Fallback: if statusBadge not wired, try find by name
+        if (!statusBadge)
+        {
+            var t = transform.Find("StatusBadge");
+            if (t) statusBadge = t.GetComponent<TMP_Text>();
+        }
     }
 
-    // Single OnDisable (avoid duplicates)
     void OnDisable()
     {
         anchor?.Detach();
         _owner = null;
-        // leave alpha as-is; typically 0 by the time we disable the canvas/panel
+        _inlineCompareEnabled = false;
+        if (statusBadge) statusBadge.gameObject.SetActive(false);
+        UITooltipDebug.Log(enableLogs, this, _tag, "OnDisable() detached + cleared");
+    }
+
+    // ---------------- Context & inline comparison API ----------------
+    public void SetContext(TooltipContext ctx)
+    {
+        _context = ctx;
+        if (statusBadge)
+        {
+            statusBadge.gameObject.SetActive(true);
+            statusBadge.fontStyle = FontStyles.SmallCaps;
+            statusBadge.fontWeight = FontWeight.Medium;
+            statusBadge.fontSize = 12;
+        }
+
+        if (ctx == TooltipContext.Equipped)
+        {
+            // ensure no deltas on equipped tooltips
+            _inlineCompareEnabled = false;
+            _baseline = ItemStatsSnapshot.Zero;
+
+            if (statusBadge)
+            {
+                statusBadge.text = "EQUIPPED";
+                statusBadge.color = badgeEquipped;
+            }
+        }
+        else
+        {
+            if (statusBadge)
+            {
+                statusBadge.text = "INVENTORY";
+                statusBadge.color = badgeInventory;
+            }
+        }
+
+        UITooltipDebug.Log(enableLogs, this, _tag, "SetContext(" + ctx + ")");
+    }
+
+    public void ClearContext()
+    {
+        _context = TooltipContext.Inventory;
+        _inlineCompareEnabled = false;
+        if (statusBadge) statusBadge.gameObject.SetActive(false);
+    }
+
+    /// <summary>Enable inline per-stat deltas using a baseline snapshot.</summary>
+    public void SetInlineComparisonBaseline(ItemStatsSnapshot baseline)
+    {
+        _inlineCompareEnabled = true;
+        _baseline = baseline;
     }
 
     // -------- Owner-guarded API (prevents random hides from other slots) --------
@@ -67,32 +145,32 @@ public class ItemTooltipUI : MonoBehaviour
     /// <summary>Show & place the tooltip. Safe even when called right after creating slots.</summary>
     public void Show(ItemInstance inst, RectTransform target)
     {
+        ApplyBadgeFromContext();
         if (inst == null || inst.def == null)
         {
-            Debug.LogWarning("[ItemTooltipUI] Show called with null instance/definition.");
+            UITooltipDebug.Warn(enableLogs, this, _tag, "Show() with null inst/def");
             return;
         }
 
-        // Cache PlayerStats for Build() so it can color unmet requirements (e.g., Level) in red
+        // Cache PlayerStats (requirements coloring, etc.)
 #if UNITY_2023_1_OR_NEWER
-    _playerStatsForTooltip = _playerStatsForTooltip ?? FindFirstObjectByType<PlayerStats>();
+        _playerStatsForTooltip ??= FindFirstObjectByType<PlayerStats>();
+        _equipment            ??= FindFirstObjectByType<EquipmentController>(FindObjectsInactive.Include);
 #else
         _playerStatsForTooltip = _playerStatsForTooltip ?? FindObjectOfType<PlayerStats>();
+        _equipment = _equipment ?? FindObjectOfType<EquipmentController>(true);
 #endif
 
-        // Bring tooltip to front so it renders above inventory/equipment slots
+        // Bring tooltip above everything
         transform.SetAsLastSibling();
 
-        // Build all visual content (title, rarity, lines, description, etc.)
-        // Inside Build(...), use _playerStatsForTooltip to decide colors for requirement lines:
-        //   bool levelOk = _playerStatsForTooltip && _playerStatsForTooltip.level >= inst.def.requirements.level;
-        //   AddLine($"Level {inst.def.requirements.level}", levelOk ? labelGrey : Color.red);
+        // Build visual content
         Build(inst);
 
         // Follow the provided target (slot / item rect)
         if (anchor && target) anchor.Attach(target);
 
-        // First-pass layout so rects have valid sizes before anchoring
+        // First-pass layout before placement
         var rt = (RectTransform)transform;
         Canvas.ForceUpdateCanvases();
         LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
@@ -100,32 +178,34 @@ public class ItemTooltipUI : MonoBehaviour
         // Place the tooltip now (uses current rect sizes)
         anchor?.RepositionNow();
 
-        // Ensure visible (fade in)
+        // Fade in
         StartFade(1f);
 
-        // Second pass: after TMP/layout settle at end of frame, place again to avoid jitter
-        System.Collections.IEnumerator eof = PlaceAfterLayout();
+        // Second placement after TMP/layout settle
+        var eof = PlaceAfterLayout();
         if (isActiveAndEnabled) StartCoroutine(eof);
         else UiCoroutineRunner.Run(eof);
 
-        // Debug trace to help follow the flow while you test
-        Debug.Log($"[ItemTooltipUI] Show → '{inst.def.displayName}', " +
-                  $"Req.Level={inst.def.requirements.level}, " +
-                  $"PlayerLvl={_playerStatsForTooltip?.level.ToString() ?? "n/a"}");
+        UITooltipDebug.Log(enableLogs, this, _tag, $"Show('{inst.def.displayName}') target='{target?.name}'");
+
     }
 
     public void Hide()
     {
         anchor?.Detach();
         StartFade(0f);
+
+        // Keep the current context so the badge stays configured.
+        // We only clear inline comparison, not the badge.
+        _inlineCompareEnabled = false;
+
+        UITooltipDebug.Log(enableLogs, this, _tag, "Hide()");
     }
 
     // ---------------------------- Internals ------------------------------------
     private System.Collections.IEnumerator PlaceAfterLayout()
     {
-        // Allow one frame so TMP preferred sizes resolve
         yield return null;
-        // And end-of-frame so ContentSizeFitter/VerticalLayoutGroup settle
         yield return new WaitForEndOfFrame();
 
         if (!this || !gameObject.activeInHierarchy) yield break;
@@ -152,7 +232,6 @@ public class ItemTooltipUI : MonoBehaviour
         float t = 0f;
         float dur = Mathf.Max(0f, fadeDuration);
 
-        // stay non-blocking; if you ever want it to block, flip blocksRaycasts accordingly
         _cg.blocksRaycasts = false;
 
         if (dur <= 0f)
@@ -209,51 +288,45 @@ public class ItemTooltipUI : MonoBehaviour
 
         AddSeparator();
 
-        // ----- STATS -----
-        var sb = new StringBuilder();
-
+        // ----- BASE STATS (with inline deltas when enabled) -----
         if (def.category == ItemCategory.Weapon)
         {
             bool isWizardWeapon = def.baseDamage.wizardry > 0;
-            string atkLabel = isWizardWeapon ? "Magic Attack" : "Physical Attack";
 
             if (isWizardWeapon)
-                sb.AppendLine(StatLine(atkLabel, $"{inst.EffectiveWizardry}"));
+            {
+                AddStatLineWithInlineDelta("Magic Attack",
+                    inst.EffectiveWizardry, StatKind.Wizardry);
+            }
             else
-                sb.AppendLine(StatLine(atkLabel, $"{inst.EffectiveMinDamage} – {inst.EffectiveMaxDamage}"));
+            {
+                AddDamageLineWithInlineDelta(inst.EffectiveMinDamage, inst.EffectiveMaxDamage);
+            }
 
             if (def.baseDamage.critChance > 0)
-                sb.AppendLine(StatLine("Critical Chance", $"+{inst.EffectiveCritChance * 100f:0.#}%"));
+                AddStatLineWithInlineDelta("Critical Chance", inst.EffectiveCritChance * 100f, StatKind.CritChance, suffix: "%");
 
             if (def.baseDamage.attackSpeed > 0)
-                sb.AppendLine(StatLine("Attack Speed", $"{inst.EffectiveAttackSpeed:0.00}"));
+                AddStatLineWithInlineDelta("Attack Speed",
+                    inst.EffectiveAttackSpeed, StatKind.AttackSpeed);
 
-            sb.AppendLine(StatLine("Durability", $"{inst.currentDurability}/{def.baseDurability}"));
+            AddStatLineSimple("Durability", $"{inst.currentDurability}/{def.baseDurability}");
         }
         else if (def.category == ItemCategory.Armor || def.subtype == ItemSubtype.Shield)
         {
             if (def.baseDefense > 0)
-                sb.AppendLine(StatLine("Defense", $"+{inst.EffectiveDefense}"));
+                AddStatLineWithInlineDelta("Defense", inst.EffectiveDefense, StatKind.Defense);
+
             if (def.baseMagicResist > 0)
-                sb.AppendLine(StatLine("Magic Resist", $"+{inst.EffectiveMagicResist}%"));
+                AddStatLineWithInlineDelta("Magic Resist", inst.EffectiveMagicResist, StatKind.MagicResist, suffix: "%");
 
             if (def.hpOnKill > 0)
-                sb.AppendLine(StatLine("HP on Kill", $"+{inst.EffectiveHpOnKill:0.#}"));
+                AddStatLineWithInlineDelta("HP on Kill", inst.EffectiveHpOnKill, StatKind.HpOnKill);
+
             if (def.manaOnKill > 0)
-                sb.AppendLine(StatLine("Mana on Kill", $"+{inst.EffectiveManaOnKill:0.#}"));
+                AddStatLineWithInlineDelta("Mana on Kill", inst.EffectiveManaOnKill, StatKind.MpOnKill);
 
-            sb.AppendLine(StatLine("Durability", $"{inst.currentDurability}/{def.baseDurability}"));
-        }
-        else if (def.category == ItemCategory.Accessory)
-        {
-            // reserved for accessory lines
-        }
-
-        if (sb.Length > 0)
-        {
-            var lines = sb.ToString().TrimEnd('\n').Split('\n');
-            foreach (var line in lines) AddLine(line);
-            AddSeparator();
+            AddStatLineSimple("Durability", $"{inst.currentDurability}/{def.baseDurability}");
         }
 
         // ----- REQS + TYPE -----
@@ -261,7 +334,6 @@ public class ItemTooltipUI : MonoBehaviour
         bool levelOk = !hasStats || _playerStatsForTooltip.level >= def.requirements.level;
 
         var reqLevel = AddLine(StatLine("Required Level", $"{def.requirements.level}"));
-        // whole line red if unmet
         reqLevel.color = levelOk ? new Color(0.85f, 0.85f, 0.85f) : Color.red;
 
         AddLine(StatLine("Type", EquipTypeLabel(def)));
@@ -284,12 +356,113 @@ public class ItemTooltipUI : MonoBehaviour
             }
         }
 
-        // Ensure rect is up to date before first placement
+        // (No bottom "Comparison" block — inline deltas already shown)
         var rt = (RectTransform)transform;
         Canvas.ForceUpdateCanvases();
         LayoutRebuilder.ForceRebuildLayoutImmediate(rt);
     }
 
+    // ---------------- Inline delta helpers ----------------
+    private enum StatKind { Damage, AttackSpeed, Defense, MagicResist, HpOnKill, MpOnKill, Wizardry, CritChance }
+
+    private void AddDamageLineWithInlineDelta(int min, int max)
+    {
+        string value = $"{min} – {max}";
+        string line = StatLine("Physical Attack", value);
+
+        if (_inlineCompareEnabled)
+        {
+            int dMin = min - _baseline.dmgMin;
+            int dMax = max - _baseline.dmgMax;
+            if (dMin != 0 || dMax != 0)
+                line += "  " + InlineDeltaRange(dMin, dMax);
+        }
+        AddLine(line);
+    }
+
+    private void AddStatLineWithInlineDelta(string label, float current, StatKind kind, string suffix = "")
+    {
+        string main = suffix == "%" ? $"{current:0.#}%" : $"{current:0.##}";
+        string line = StatLine(label, main);
+
+        if (_inlineCompareEnabled)
+        {
+            float diff = kind switch
+            {
+                StatKind.AttackSpeed => current - _baseline.atkSpeed,
+                StatKind.Defense => current - _baseline.defense,
+                StatKind.MagicResist => current - _baseline.magicResist,
+                StatKind.HpOnKill => current - _baseline.hpOnKill,
+                StatKind.MpOnKill => current - _baseline.mpOnKill,
+                StatKind.Wizardry => current - _baseline.wizardry,
+                StatKind.CritChance => current - (_baseline.critChance * 100f),
+                _ => 0f
+            };
+            if (!Mathf.Approximately(diff, 0f))
+                line += "  " + InlineDeltaFloat(diff, suffix);
+        }
+
+        AddLine(line);
+    }
+
+    private void AddStatLineSimple(string label, string value)
+    {
+        AddLine(StatLine(label, value));
+    }
+
+    private static string InlineDeltaRange(int dMin, int dMax)
+    {
+        // both up or both down → one sign, one arrow, parentheses
+        bool bothUp = dMin > 0 && dMax > 0;
+        bool bothDown = dMin < 0 && dMax < 0;
+
+        if (bothUp || bothDown)
+        {
+            string sign = bothUp ? "+" : "-";
+            string col = bothUp ? COL_POS : COL_NEG;
+            string arrow = bothUp ? "▲" : "▼";
+            int absMin = Mathf.Abs(dMin);
+            int absMax = Mathf.Abs(dMax);
+            // → "+ ( 7 – 3 ) ▲"
+            return $"<color={col}>{sign} ( {absMin} – {absMax} ) {arrow}</color>";
+        }
+
+        // mixed → color each term separately, no parentheses
+        System.Text.StringBuilder sb = new System.Text.StringBuilder();
+
+        if (dMin != 0)
+        {
+            bool up = dMin > 0;
+            string col = up ? COL_POS : COL_NEG;
+            string arrow = up ? "▲" : "▼";
+            sb.Append($"<color={col}>{(up ? "+" : "-")} {Mathf.Abs(dMin)} min {arrow}</color>");
+        }
+
+        if (dMax != 0)
+        {
+            if (sb.Length > 0) sb.Append("  "); // space between parts
+            bool up = dMax > 0;
+            string col = up ? COL_POS : COL_NEG;
+            string arrow = up ? "▲" : "▼";
+            sb.Append($"<color={col}>{(up ? "+" : "-")} {Mathf.Abs(dMax)} max {arrow}</color>");
+        }
+
+        return sb.ToString();
+    }
+
+
+    private static string InlineDeltaFloat(float diff, string suffix = "")
+    {
+        string col = diff > 0 ? COL_POS : COL_NEG;
+        string arrow = diff > 0 ? "▲" : "▼";
+        float abs = Mathf.Abs(diff);
+        string val = suffix == "%" ? $"{abs:0.#}%" : $"{abs:0.##}";
+        string sign = diff > 0 ? "+" : "-";
+        // → "+ 2.0% ▲"
+        return $"<color={col}>{sign} {val} {arrow}</color>";
+    }
+
+    // ---------------- UI line builders ----------------
     private TMP_Text AddLine(string text)
     {
         TMP_Text tmp = null;
@@ -402,5 +575,36 @@ public class ItemTooltipUI : MonoBehaviour
             ItemSubtype.Amulet => "Amulet",
             _ => def.subtype.ToString()
         };
+    }
+
+    public void ClearInlineComparison()
+    {
+        // OLD: only zeroed the baseline (left the flag ON)
+        // SetInlineComparisonBaseline(ItemStatsSnapshot.Zero);
+
+        // NEW: actually disable the feature
+        _inlineCompareEnabled = false;
+        _baseline = ItemStatsSnapshot.Zero;
+    }
+
+    private void ApplyBadgeFromContext()
+    {
+        if (!statusBadge) return;
+
+        statusBadge.gameObject.SetActive(true);
+        statusBadge.fontStyle = FontStyles.SmallCaps;
+        statusBadge.fontWeight = FontWeight.Medium;
+        statusBadge.fontSize = 12;
+
+        if (_context == TooltipContext.Equipped)
+        {
+            statusBadge.text = "EQUIPPED";
+            statusBadge.color = badgeEquipped;
+        }
+        else
+        {
+            statusBadge.text = "INVENTORY";
+            statusBadge.color = badgeInventory;
+        }
     }
 }
