@@ -215,7 +215,7 @@ public class ItemTooltipUI : MonoBehaviour
         if (def.category == ItemCategory.Weapon)
         {
             bool isWizardWeapon = def.baseDamage.wizardry > 0;
-            string atkLabel = isWizardWeapon ? "Wizardry Attack" : "Attack Power";
+            string atkLabel = isWizardWeapon ? "Magic Attack" : "Physical Attack";
 
             if (isWizardWeapon)
                 sb.AppendLine(StatLine(atkLabel, $"{inst.EffectiveWizardry}"));

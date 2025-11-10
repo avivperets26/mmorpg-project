@@ -17,10 +17,10 @@ public class StatAllocationUI : MonoBehaviour
     [System.Serializable]
     public class StatRow
     {
-        public string statName;     // "Strength", "Vitality", ...
-        public TMP_Text nameAndValueLabel; // merged: "Strength: 12"
-        public Button plusBtn;      // [+] only
-        public TMP_Text detailsText;// multi-line details under the row
+        public string statName;            // "Strength", "Vitality", ...
+        public TMP_Text nameAndValueLabel;  // merged: "Strength: 12"
+        public Button plusBtn;            // [+] only
+        public TMP_Text detailsText;        // multi-line details under the row
     }
 
     [Header("Rows (order = UI order)")]
@@ -55,8 +55,15 @@ public class StatAllocationUI : MonoBehaviour
 
     private const string DimOpen = "<color=#FFFFFF99>"; // ~60% opacity
     private const string DimClose = "</color>";
-
     private static string Dim(string t) => $"{DimOpen}{t}{DimClose}";
+
+    private const string PosOpen = "<color=#6CFF6C>";
+    private const string PosClose = "</color>";
+    private static string Pos(string t) => $"{PosOpen}{t}{PosClose}";
+
+    private const string NegOpen = "<color=#FF6C6C>";
+    private static string Neg(string t) => $"{NegOpen}{t}{PosClose}";
+
 
     // ---------- Unity ----------
 
@@ -82,7 +89,7 @@ public class StatAllocationUI : MonoBehaviour
         WireRow(dexterityRow, OnPlusDexterity, "Dexterity");
         WireRow(energyRow, OnPlusEnergy, "Energy");
 
-        // Ensure details TMPs render rich text (for <alpha=...>)
+        // Ensure details TMPs render rich text
         EnsureRichText(strengthRow?.detailsText);
         EnsureRichText(vitalityRow?.detailsText);
         EnsureRichText(dexterityRow?.detailsText);
@@ -100,19 +107,23 @@ public class StatAllocationUI : MonoBehaviour
         if (!t) return;
         t.richText = true;
 #if UNITY_2021_3_OR_NEWER
-    t.textWrappingMode = TextWrappingModes.Normal;
+        t.textWrappingMode = TextWrappingModes.Normal;
 #else
         t.enableWordWrapping = true;
 #endif
         t.overflowMode = TextOverflowModes.Overflow;
     }
 
-
-    private void OnEnable()
+    void OnEnable()
     {
+        if (playerStats) playerStats.OnDerivedChanged += RefreshAll;
         RefreshAll();
     }
 
+    void OnDisable()
+    {
+        if (playerStats) playerStats.OnDerivedChanged -= RefreshAll;
+    }
     // ---------- Public API: Show / Hide ----------
 
     public void Open()
@@ -136,7 +147,7 @@ public class StatAllocationUI : MonoBehaviour
         });
     }
 
-    public void CancelAndCloseUI() => Close(); // points are final now
+    public void CancelAndCloseUI() => Close();
     public void OnPressClose() => Close();
 
     // ---------- Internal: Fade ----------
@@ -150,10 +161,8 @@ public class StatAllocationUI : MonoBehaviour
             return;
         }
 
-        // If this component isn't active yet, run the coroutine on a global runner.
         if (!isActiveAndEnabled)
         {
-            // Make sure the panel is visible if we're animating to 1
             if (to >= 1f && rootPanel && !rootPanel.activeSelf)
                 rootPanel.SetActive(true);
 
@@ -223,20 +232,20 @@ public class StatAllocationUI : MonoBehaviour
 
     // ---------- UI refresh ----------
 
-    private void RefreshAll()
+    public void RefreshAll()
     {
         if (!playerStats) return;
 
         if (availablePointsText)
             availablePointsText.text = $"Points Available: {playerStats.availableStatPoints}";
 
-        // Order: Strength, Vitality, Dexterity, Energy (as requested)
+        // Order: Strength, Vitality, Dexterity, Energy
         RefreshRow(strengthRow, playerStats.strength, BuildDetailsForStrength());
         RefreshRow(vitalityRow, playerStats.vitality, BuildDetailsForVitality());
         RefreshRow(dexterityRow, playerStats.dexterity, BuildDetailsForDexterity());
         RefreshRow(energyRow, playerStats.energy, BuildDetailsForEnergy());
 
-        // Hide [+] entirely when you can't add
+        // Hide [+] when you can't add
         bool canAdd = playerStats.availableStatPoints > 0;
         SetPlusState(strengthRow, canAdd);
         SetPlusState(vitalityRow, canAdd);
@@ -259,14 +268,14 @@ public class StatAllocationUI : MonoBehaviour
     {
         if (row?.plusBtn == null) return;
         row.plusBtn.interactable = canAdd;
-        row.plusBtn.gameObject.SetActive(canAdd); // ← HIDE when no points
+        row.plusBtn.gameObject.SetActive(canAdd);
     }
 
     // ---------- Calculations for details (your terminology) ----------
 
     private int Level => playerStats != null ? playerStats.level : 1;
 
-    // Local fallbacks (keep UI free of hard PlayerStats dependencies)
+    // Local fallbacks (kept for future; not used when playerStats available)
     private int WeaponBaseMin => fallbackWeaponBaseMin;
     private int WeaponBaseMax => fallbackWeaponBaseMax;
     private int StaffBaseMin => fallbackStaffBaseMin;
@@ -280,25 +289,46 @@ public class StatAllocationUI : MonoBehaviour
     private int ENG => playerStats ? playerStats.energy : 0;
 
     // --- Strength ---
-    // Physical Attack [min - max]
-    // Attack Success Rate [min - max]
-    // Critical Chance [min - max]
     private string BuildDetailsForStrength()
     {
-        int physMin = WeaponBaseMin + 2 * STR;
-        int physMax = WeaponBaseMax + 2 * STR;
+        // Base from attributes only (no gear).
+        int baseMin = 2 * STR;
+        int baseMax = 2 * STR;
+
+        // Gear contribution (from PlayerStats aggregation)
+        int gearMin = playerStats ? playerStats.equipDamageMin : 0;
+        int gearMax = playerStats ? playerStats.equipDamageMax : 0;
+
+        // Totals (shown as min–max)
+        int totalMin = baseMin + gearMin;
+        int totalMax = baseMax + gearMax;
+
+        // Attack success & crit base
         int hitMin = 80 + 1 * Level + 3 * STR;
         int hitMax = 120 + 3 * Level + 6 * STR;
-        float critMin = 2f + 0.10f * STR;
-        float critMax = 5f + 0.25f * STR;
+        float baseCritMin = 2f + 0.10f * STR;
+        float baseCritMax = 5f + 0.25f * STR;
+
+        // Gear crit in percentage points
+        float gearCrit = playerStats ? playerStats.equipCritChance : 0f;
+        float totalCritMin = baseCritMin + gearCrit;
+        float totalCritMax = baseCritMax + gearCrit;
+
+        // Deltas (green): + (min–max) and + (x%)
+        string deltaPhys = (gearMin == 0 && gearMax == 0)
+            ? ""
+            : (gearMin == gearMax
+                ? $" {Pos($"+ ({gearMin})")}"
+                : $" {Pos($"+ ({gearMin}–{gearMax})")}");
+        string deltaCrit = gearCrit > 0f ? $" {Pos($"+ ({gearCrit:0.0}%)")}" : "";
 
         return
-            $"{Dim("Physical Attack")}: {physMin}–{physMax}\n" +
+            $"{Dim("Physical Attack")}: {totalMin}–{totalMax}{deltaPhys}\n" +
             $"{Dim("Attack Success Rate")}: {hitMin}–{hitMax}\n" +
-            $"{Dim("Critical Chance")}: {critMin:0.0}%–{critMax:0.0}%";
+            $"{Dim("Critical Chance")}: {totalCritMin:0.0}%–{totalCritMax:0.0}%{deltaCrit}";
     }
+
     // --- Vitality ---
-    // Max Health Point, Max Health Regeneration, Immunity rate (non-magic)
     private string BuildDetailsForVitality()
     {
         int maxHP = 100 + 10 * Level + 20 * VIT;
@@ -312,37 +342,69 @@ public class StatAllocationUI : MonoBehaviour
     }
 
     // --- Dexterity ---
-    // Attack Speed, Armor, Evasion rate
     private string BuildDetailsForDexterity()
     {
-        float atkSpd = 100f + 0.8f * DEX;
-        int armor = EquipDefense + Mathf.FloorToInt(0.4f * DEX);
+        float baseAtkSpd = 100f + 0.8f * DEX;
+        float gearAtkSpd = playerStats ? playerStats.equipAttackSpeedRating : 0f;
+        float totalAtkSpd = baseAtkSpd + gearAtkSpd;
+
+        // Show +(...) or -(...) in green/red
+        string deltaAtkSpd =
+            Mathf.Abs(gearAtkSpd) > 0.01f
+                ? (gearAtkSpd > 0 ? $" {Pos($"+ ({gearAtkSpd:0})")}" : $" {Neg($"- ({Mathf.Abs(gearAtkSpd):0})")}")
+                : "";
+
+        // Optional: show approximate APS resulting from gear delta only
+        float approxAPS = 1f + (gearAtkSpd / 100f); // 0 rating => 1.00 APS, +20 => 1.20 APS
+        string apsHint = $"  (~{approxAPS:0.00} APS)";
+
+        int gearArmor = playerStats ? playerStats.equipDefense : 0;
+        int baseArmor = Mathf.FloorToInt(0.4f * DEX);
+        int totalArmor = baseArmor + gearArmor;
+        string deltaArmor = gearArmor > 0 ? $" {Pos($"+ ({gearArmor})")}" : "";
+
         float evasion = 0.20f * DEX;
 
         return
-            $"{Dim("Attack Speed")}: {atkSpd:0}\n" +
-            $"{Dim("Armor")}: {armor}\n" +
+            $"{Dim("Attack Speed")}: {totalAtkSpd:0}{deltaAtkSpd}{apsHint}\n" +
+            $"{Dim("Armor")}: {totalArmor}{deltaArmor}\n" +
             $"{Dim("Evasion Rate")}: {evasion:0.0}%";
     }
 
+
+
     // --- Energy ---
-    // Max Mana Point, Magic Attack [min-max], Magic critical [min-max], Mana Regeneration, Magic Resistance
     private string BuildDetailsForEnergy()
     {
         int maxMP = 50 + 5 * Level + 15 * ENG;
-        int mMin = StaffBaseMin + 3 * ENG;
-        int mMax = StaffBaseMax + 3 * ENG;
+
+        int baseMMin = 3 * ENG;
+        int baseMMax = 3 * ENG;
+
+        int gearWiz = playerStats ? Mathf.RoundToInt(playerStats.equipWizardry) : 0;
+
+        int totalMMin = baseMMin + gearWiz;
+        int totalMMax = baseMMax + gearWiz;
+
+        // Wizardry adds flat to both ends; show + (X)
+        string deltaMagic = gearWiz > 0 ? $" {Pos($"+ ({gearWiz})")}" : "";
+
         const float critMult = 1.5f;
-        int mcMin = Mathf.RoundToInt(mMin * critMult);
-        int mcMax = Mathf.RoundToInt(mMax * critMult);
+        int mcMin = Mathf.RoundToInt(totalMMin * critMult);
+        int mcMax = Mathf.RoundToInt(totalMMax * critMult);
+
         float mp5 = 1f + 0.4f * ENG;
-        int mRes = EquipMRes + ENG;
+
+        int gearMRes = playerStats ? playerStats.equipMagicResist : 0;
+        int baseMRes = ENG;
+        int totalMRes = baseMRes + gearMRes;
+        string deltaMRes = gearMRes > 0 ? $" {Pos($"+ ({gearMRes})")}" : "";
 
         return
             $"{Dim("Max MP")}: {maxMP}\n" +
-            $"{Dim("Magic Attack")}: {mMin}–{mMax}\n" +
+            $"{Dim("Magic Attack")}: {totalMMin}–{totalMMax}{deltaMagic}\n" +
             $"{Dim("Magic Critical")}: {mcMin}–{mcMax}\n" +
             $"{Dim("MP Regen/5s")}: {mp5:0.0}\n" +
-            $"{Dim("Magic Resist")}: {mRes}";
+            $"{Dim("Magic Resist")}: {totalMRes}{deltaMRes}";
     }
 }

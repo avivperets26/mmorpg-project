@@ -1,77 +1,51 @@
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
+// Assets/Scripts/Inventory/ItemDefinition.cs
 using UnityEngine;
 using Game.Items;
 
-/// <summary>
-/// Per-item tuning used ONLY for the inventory/UI 3D preview.
-/// Keeps your world prefab untouched.
-/// </summary>
 [System.Serializable]
 public class ItemPreviewOptions
 {
-    [Tooltip("Optional child path inside the prefab to render (e.g. 'Model'). Leave empty to use root.")]
     public string modelRootPath = "Model";
-
-    [Tooltip("Extra Euler rotation applied only in the preview (deg).")]
     public Vector3 rotationOffsetEuler = Vector3.zero;
-
-    [Tooltip("Extra local position offset for preview framing (world units).")]
     public Vector3 positionOffset = Vector3.zero;
-
-    [Tooltip("Uniform scale multiplier for preview only.")]
     public float scale = 1f;
-
-    [Tooltip("How much space to leave around the model when framing the camera.")]
     [Min(1.0f)] public float padding = 1.12f;
-
-    [Tooltip("Final 2D nudge (pixels) applied to the UI image after placement. +X right, +Y up.")]
     public Vector2 uiOffsetPx = Vector2.zero;
 }
 
 [CreateAssetMenu(menuName = "MMO/Item Definition", fileName = "ItemDefinition")]
 public class ItemDefinition : ScriptableObject
 {
-    // ---------------------- Identity & Presentation ----------------------
-
-    [Header("Identity")]
+    // Identity & Presentation
     public string itemId;
     public string displayName;
-
     [TextArea] public string description = "";
 
-    [Header("Inventory Size (grid cells)")]
+    // Inventory Size (grid cells)
     [Min(1)] public int width = 1;
     [Min(1)] public int height = 1;
 
-    [Header("Prefabs")]
+    // Prefabs
     [Tooltip("Prefab placed in the world for pickups.")]
     public GameObject worldPrefab;
-
     [Tooltip("Clean prefab for UI preview only (no labels/roots). Falls back to worldPrefab if null.")]
     public GameObject inventoryPreviewPrefab;
 
-    [Header("2D Icon (optional)")]
+    // 2D Icon (optional)
     public Sprite icon;
 
-    [Header("3D Preview Tuning (UI only)")]
+    // 3D Preview Tuning (UI only)
     public ItemPreviewOptions preview = new ItemPreviewOptions();
 
-    // ---------------------- Classification ----------------------
-
-    [Header("Classification")]
+    // Classification
     public ItemCategory category = ItemCategory.Weapon;
     public ItemSubtype subtype = ItemSubtype.Sword;
 
-    [Header("Weapon Handling")]
+    // Weapon Handling
     [Tooltip("How this weapon is held. For non-weapons leave as None.")]
     public WeaponGrip grip = WeaponGrip.None;
 
-    // ---------------------- Requirements ----------------------
-
-    [Header("Requirements")]
-    [Tooltip("Minimum level, allowed classes, and min stats to equip.")]
+    // Requirements
     public ItemRequirements requirements = new ItemRequirements
     {
         level = 1,
@@ -81,65 +55,33 @@ public class ItemDefinition : ScriptableObject
         minEnergy = 0
     };
 
-    // ---------------------- Base Stats ----------------------
+    // Variant Stats (drawn conditionally by custom editor)
+    [Tooltip("Physical (min/max) or Wizardry for magic weapons. Crit chance 0..1 or 0..100%, crit multiplier e.g. 1.5, attack speed in APS.")]
+    public DamageProfile baseDamage = new DamageProfile(); // used when category == Weapon
 
-    [Header("Base Stats")]
-    [Tooltip("Physical (min/max) or Wizardry for magic weapons. Crit chance 0..1, multiplier e.g. 1.5 = +50%. AttackSpeed in attacks/sec or normalized.")]
-    public DamageProfile baseDamage;
+    [Tooltip("Physical defense (armor/shields).")]
+    public int baseDefense = 0;      // used when category == Armor || subtype == Shield
+    [Tooltip("Magic resistance (armor/shields).")]
+    public int baseMagicResist = 0;  // used when category == Armor || subtype == Shield
 
-    [Tooltip("Armor/Shield physical defense. Ignored for non-armor items.")]
-    public int baseDefense = 0;
-
-    [Tooltip("Armor/Shield magic resistance. Ignored for non-armor items.")]
-    public int baseMagicResist = 0;
-
-    [Tooltip("HP restored after killing a monster (armor/shields options).")]
+    // Generic bonuses
     public float hpOnKill = 0f;
-
-    [Tooltip("Mana restored after killing a monster (armor/shields options).")]
     public float manaOnKill = 0f;
 
-    // ---------------------- Durability & Value ----------------------
-
-    [Header("Durability & Value")]
-    [Tooltip("Max durability when new.")]
+    // Durability & Value
     public int baseDurability = 50;
-
-    [Tooltip("Base NPC store value (gold).")]
     public int baseValue = 10;
 
-    // ---------------------- Blessing & Sockets ----------------------
-
-    [Tooltip("Whether this item type can roll as Blessed.")]
+    // Blessing & Sockets
     public bool canBeBlessed = true;
-
-    [Tooltip("Socket family this item accepts (weapon/armor/jewelry).")]
     public SocketSlotType socketSlotType = SocketSlotType.Weapon;
+    [Min(0)] public int socketsMax = 0; // editor-clamped by footprint
 
-    [Tooltip("Max sockets this item can have (Rings/Amulets usually 1; weapons 0-4).")]
-    [HideInInspector][Min(0)] public int socketsMax = 0;
-
-
-    // ---------------------- Tier / Rarity ----------------------
-
-    [Header("Tier / Rarity")]
-    [Tooltip("Primary rarity system used by tooltips, labels and multipliers.")]
+    // Tier / Rarity
     public ItemTier defaultTier = ItemTier.Common;
-
-    [Header("Legacy (compatibility)")]
-    [Tooltip("Your original 3-tier rarity. Optional: only used by old systems. You can ignore this once migrated.")]
     public ItemRarity legacyRarity = ItemRarity.Common;
 
-    // ---------------------- Convenience helpers ----------------------
-
-    /// <summary>
-    /// Color used for labels/tooltips based on current tier.
-    /// </summary>
     public Color TierLabelColor => RarityRules.GetLabelColor(defaultTier);
-
-    /// <summary>
-    /// Backward-compat color if some UI still reads legacy rarity.
-    /// </summary>
     public static Color RarityColor(ItemRarity r) => r switch
     {
         ItemRarity.Common => Color.white,
@@ -151,102 +93,78 @@ public class ItemDefinition : ScriptableObject
 #if UNITY_EDITOR
     private void OnValidate()
     {
-        // Auto-derive category from subtype if user edits subtype directly.
         category = EquipmentMapping.GetCategoryForSubtype(subtype);
-
-        // 🔧 Auto-infer grip from subtype (only if unset/None)
         AutoInferGripIfUnset();
-
-        // 🔧 Normalize combat fields (editor safety)
         NormalizeCombatFields();
 
-        // Gentle clamping
-        width  = Mathf.Max(1, width);
-        height = Mathf.Max(1, height);
+        width          = Mathf.Max(1, width);
+        height         = Mathf.Max(1, height);
         baseDurability = Mathf.Max(1, baseDurability);
-        baseValue = Mathf.Max(0, baseValue);
+        baseValue      = Mathf.Max(0, baseValue);
 
-        // ❗ dynamic clamp based on footprint size (1x3 => 3, 1x1 => 1)
-        socketsMax = Mathf.Clamp(socketsMax, 0, CalcMaxSocketsLimit());
+        socketsMax = Mathf.Clamp(socketsMax, 0, Mathf.Max(1, width * height));
 
-        // Ensure preview defaults are sane
         if (preview == null) preview = new ItemPreviewOptions();
         preview.padding = Mathf.Max(1.0f, preview.padding);
-        preview.scale = Mathf.Max(0.001f, preview.scale);
+        preview.scale   = Mathf.Max(0.001f, preview.scale);
+
+        socketSlotType = DeriveSocketSlotType(category, subtype, socketSlotType);
     }
 
-    // --- Helpers (editor-only) ------------------------------------------------
+    private static SocketSlotType DeriveSocketSlotType(ItemCategory cat, ItemSubtype sub, SocketSlotType current)
+    {
+        if (sub == ItemSubtype.Ring || sub == ItemSubtype.Amulet) return SocketSlotType.Jewelry;
+        if (sub == ItemSubtype.Shield)                             return SocketSlotType.Armor;
+        if (cat == ItemCategory.Weapon)                            return SocketSlotType.Weapon;
+        if (cat == ItemCategory.Armor)                             return SocketSlotType.Armor;
+        return current;
+    }
 
     private void AutoInferGripIfUnset()
     {
-        if (grip != WeaponGrip.None) return; // user already chose
-
+        if (category != ItemCategory.Weapon || grip != WeaponGrip.None) return;
         switch (subtype)
         {
             case ItemSubtype.Shield:
             case ItemSubtype.Orb:
             case ItemSubtype.Book:
-            case ItemSubtype.Arrows:
-                grip = WeaponGrip.OffHandOnly; LogOnce($"Auto-set Grip = OffHandOnly for {subtype}"); break;
-
+            case ItemSubtype.Arrows: grip = WeaponGrip.OffHandOnly; break;
             case ItemSubtype.Bow:
-            case ItemSubtype.Staff:
-                grip = WeaponGrip.TwoHanded;   LogOnce($"Auto-set Grip = TwoHanded for {subtype}"); break;
-
+            case ItemSubtype.Staff:  grip = WeaponGrip.TwoHanded;   break;
             case ItemSubtype.Sword:
             case ItemSubtype.Dagger:
             case ItemSubtype.Axe:
             case ItemSubtype.Mace:
-            case ItemSubtype.Spear:
-                grip = WeaponGrip.OneHanded;   LogOnce($"Auto-set Grip = OneHanded for {subtype}"); break;
-
-            default:
-                grip = WeaponGrip.None; break; // armor/accessories
+            case ItemSubtype.Spear:  grip = WeaponGrip.OneHanded;   break;
+            default:                 grip = WeaponGrip.None;         break;
         }
     }
 
     private void NormalizeCombatFields()
     {
-        // Crit Chance: allow 0..1, or 1..100 as %
+        if (category != ItemCategory.Weapon) return;
+
         if (baseDamage.critChance > 1f && baseDamage.critChance <= 100f)
-        { baseDamage.critChance /= 100f; LogOnce("Normalized Crit Chance from % to 0..1"); }
+            baseDamage.critChance /= 100f;
         baseDamage.critChance = Mathf.Clamp01(baseDamage.critChance);
 
-        // Crit Multiplier: allow percent-like (e.g., 150 => 1.5)
         if (baseDamage.critMultiplier >= 10f)
-        { baseDamage.critMultiplier /= 100f; LogOnce("Normalized Crit Multiplier from % to factor"); }
+            baseDamage.critMultiplier /= 100f;
         baseDamage.critMultiplier = Mathf.Clamp(baseDamage.critMultiplier, 1.0f, 5.0f);
 
-        // Attack Speed: avoid zero/negative
-        if (baseDamage.attackSpeed <= 0f) { baseDamage.attackSpeed = 1f; LogOnce("Attack Speed was <= 0; set to 1"); }
+        if (baseDamage.attackSpeed <= 0f) baseDamage.attackSpeed = 1f;
         else baseDamage.attackSpeed = Mathf.Clamp(baseDamage.attackSpeed, 0.05f, 50f);
 
-        // Keep damage sane
-        baseDamage.min = Mathf.Max(0, baseDamage.min);
-        baseDamage.max = Mathf.Max(baseDamage.min, baseDamage.max);
+        baseDamage.min      = Mathf.Max(0, baseDamage.min);
+        baseDamage.max      = Mathf.Max(baseDamage.min, baseDamage.max);
         baseDamage.wizardry = Mathf.Max(0, baseDamage.wizardry);
-    }
-
-    private int CalcMaxSocketsLimit()
-    {
-        // Rule: max sockets <= footprint cells (e.g., 1x3 => 3, 1x1 => 1)
-        return Mathf.Max(1, width * height);
-    }
-
-    [System.NonSerialized] private bool _loggedThisFrame;
-    private void LogOnce(string msg)
-    {
-        if (_loggedThisFrame) return;
-        _loggedThisFrame = true;
-        EditorApplication.delayCall += () => { _loggedThisFrame = false; };
-        Debug.Log($"[ItemDefinition:{name}] {msg}");
     }
 
     [ContextMenu("Sync Legacy Rarity -> Tier (one-time)")]
     private void SyncLegacyRarityToTier()
     {
         defaultTier = legacyRarity.ToTier();
-        EditorUtility.SetDirty(this);
+        UnityEditor.EditorUtility.SetDirty(this);
         Debug.Log($"[ItemDefinition] Synced legacyRarity={legacyRarity} to defaultTier={defaultTier} on {name}");
     }
 #endif

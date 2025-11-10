@@ -20,6 +20,10 @@ public class PlayerStats : MonoBehaviour
     public float equipHpOnKill;
     public float equipManaOnKill;
 
+    // NEW: weapon-driven aggregates
+    public float equipCritChance;          // percentage points added by gear (0..100)
+    public float equipAttackSpeedRating;   // rating points (1.10 aps => +10 rating)
+
     // --- Core attributes & points you can spend ---
     [Header("Core Attributes")]
     public int strength = 5;
@@ -63,6 +67,8 @@ public class PlayerStats : MonoBehaviour
     public event Action OnVitalsChanged;
     public event Action OnXpChanged;
     public event Action OnLevelChanged;
+    public event Action OnDerivedChanged;
+
 
     // --- Convenience ---
     public bool BootsEquipped => moveSpeedMultiplier > 1f;
@@ -72,11 +78,12 @@ public class PlayerStats : MonoBehaviour
     public int CurrentHp => currentHp;
     public int CurrentMp => currentMp;
     public int MaxHp => 100 + 10 * level + 20 * vitality; // mirrors StatAllocationUI
-    public int MaxMp => 50 + 5 * level + 15 * energy;      // mirrors StatAllocationUI
-
+    public int MaxMp => 50 + 5 * level + 15 * energy;    // mirrors StatAllocationUI
     public int CurrentXp => currentXp;
     public int XpToNext => xpToNext;
     public float XpNormalized => xpToNext <= 0 ? 0f : Mathf.Clamp01(currentXp / (float)xpToNext);
+
+
 
     // ---------- Unity ----------
     private void Start()
@@ -120,10 +127,9 @@ public class PlayerStats : MonoBehaviour
         if (level < 1) level = 1;
 
         // Recompute XP needed to go from 'level' -> 'level + 1'
-        xpToNext = ExpToNextFor(level);      // WoW-style step: level * 50
+        xpToNext = ExpToNextFor(level); // WoW-style step: level * 50
 
         // If we're in the editor (not playing), keep current vitals within new caps
-        // so the Inspector always shows consistent numbers when you tweak stats.
         if (!Application.isPlaying)
         {
             currentHp = Mathf.Min(currentHp, MaxHp);
@@ -131,27 +137,22 @@ public class PlayerStats : MonoBehaviour
         }
     }
 
-
     // ---- Movement from boots ----
-    public void EquipBoots(float speedMultiplier)
-    {
-        moveSpeedMultiplier = Mathf.Max(speedMultiplier, 0.01f);
-    }
-    public void UnequipBoots()
-    {
-        moveSpeedMultiplier = 1f;
-    }
+    public void EquipBoots(float speedMultiplier) => moveSpeedMultiplier = Mathf.Max(speedMultiplier, 0.01f);
+    public void UnequipBoots() => moveSpeedMultiplier = 1f;
 
     // ---- Armor aggregations ----
     public void AddArmor(int defense, int magicResist)
     {
         equipDefense += Mathf.Max(0, defense);
         equipMagicResist += Mathf.Max(0, magicResist);
+        RaiseDerived();
     }
     public void RemoveArmor(int defense, int magicResist)
     {
         equipDefense = Mathf.Max(0, equipDefense - Mathf.Max(0, defense));
         equipMagicResist = Mathf.Max(0, equipMagicResist - Mathf.Max(0, magicResist));
+        RaiseDerived();
     }
 
     // ---- Weapon aggregations (simple MVP) ----
@@ -160,12 +161,27 @@ public class PlayerStats : MonoBehaviour
         equipDamageMin += Mathf.Max(0, dmg.min);
         equipDamageMax += Mathf.Max(0, dmg.max);
         equipWizardry += Mathf.Max(0, dmg.wizardry);
+
+        // Crit: store as percentage points (0..100)
+        equipCritChance += Mathf.Max(0f, dmg.critChance * 100f);
+
+        // Attack speed rating: 1.00 APS => 0, 1.20 => +20, 0.85 => -15
+        float ratingDelta = Mathf.Round((dmg.attackSpeed - 1f) * 100f);
+        equipAttackSpeedRating += ratingDelta;   // allow negative for slow weapons
+        RaiseDerived();
     }
+
     public void RemoveWeapon(DamageProfile dmg)
     {
         equipDamageMin = Mathf.Max(0, equipDamageMin - Mathf.Max(0, dmg.min));
         equipDamageMax = Mathf.Max(0, equipDamageMax - Mathf.Max(0, dmg.max));
         equipWizardry = Mathf.Max(0, equipWizardry - Mathf.Max(0, dmg.wizardry));
+
+        equipCritChance = Mathf.Max(0f, equipCritChance - Mathf.Max(0f, dmg.critChance * 100f));
+
+        float ratingDelta = Mathf.Round((dmg.attackSpeed - 1f) * 100f);
+        equipAttackSpeedRating -= ratingDelta;   // undo (keeps sign)
+        RaiseDerived();
     }
 
     // ---- On-kill bonuses ----
@@ -173,11 +189,13 @@ public class PlayerStats : MonoBehaviour
     {
         equipHpOnKill += Mathf.Max(0f, hp);
         equipManaOnKill += Mathf.Max(0f, mana);
+        RaiseDerived();
     }
     public void RemoveOnKill(float hp, float mana)
     {
         equipHpOnKill = Mathf.Max(0f, equipHpOnKill - Mathf.Max(0f, hp));
         equipManaOnKill = Mathf.Max(0f, equipManaOnKill - Mathf.Max(0f, mana));
+        RaiseDerived();
     }
 
     // === Helpers used by the Stat UI ===
@@ -295,11 +313,11 @@ public class PlayerStats : MonoBehaviour
         return xp;
     }
 
-    public void GainXpFromMob(int mobLevel)
-    {
-        GainXp(GetMobXp(mobLevel));
-    }
+    public void GainXpFromMob(int mobLevel) => GainXp(GetMobXp(mobLevel));
 
     private void RaiseVitals() => OnVitalsChanged?.Invoke();
     private void RaiseXP() => OnXpChanged?.Invoke();
+
+    private void RaiseDerived() => OnDerivedChanged?.Invoke();
+
 }
