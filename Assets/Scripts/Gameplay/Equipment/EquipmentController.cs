@@ -5,6 +5,8 @@ using System.Linq;            // only used in RefreshUI() log-safe repaint
 using UnityEngine;
 using UnityEngine.UI;
 using Game.Items;
+using Game.Equipment;
+using Game.Items.Definitions;
 
 public class EquipmentController : MonoBehaviour
 {
@@ -27,6 +29,9 @@ public class EquipmentController : MonoBehaviour
     [SerializeField] private EquipmentSlotUI wings;
     [SerializeField] private EquipmentSlotUI rightHand;
     [SerializeField] private EquipmentSlotUI leftHand;
+
+    [Header("Visuals")]
+    [SerializeField] private EquipmentVisualsController visuals;
 
     [Header("Policies")]
     [Tooltip("When both hands are occupied and hovering a 1H item, prefer comparing/replacing Right Hand.")]
@@ -185,6 +190,8 @@ public class EquipmentController : MonoBehaviour
         // Update just that slot immediately
         GetSlotUI(slot)?.ShowItem(null);
 
+        visuals?.OnUnequipped(slot);
+
         Debug.Log($"[Equip] Unequipped {def.displayName} from {slot}.");
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
@@ -206,6 +213,8 @@ public class EquipmentController : MonoBehaviour
 
         // Update the specific slot immediately
         GetSlotUI(slot)?.ShowItem(def);
+
+        visuals?.OnEquipped(slot, def as IHasItemVisual);
 
         ApplyStatsOnEquip(def);
 
@@ -543,22 +552,36 @@ public class EquipmentController : MonoBehaviour
             (to == EquipmentSlot.LeftHand || to == EquipmentSlot.RightHand))
         {
             to = EquipmentSlot.RightHand;
+
+            // model state
             _equipped[EquipmentSlot.LeftHand] = null;
             _equipped[EquipmentSlot.RightHand] = def;
+
+            // UI
             GetSlotUI(EquipmentSlot.LeftHand)?.ShowItem(null);
             GetSlotUI(EquipmentSlot.RightHand)?.ShowItem(def);
+
+            // VISUALS
+            visuals?.OnUnequipped(EquipmentSlot.LeftHand);
+            visuals?.OnEquipped(EquipmentSlot.RightHand, def as IHasItemVisual);
         }
         else
         {
-            // If target occupied, unequip it to inventory (optional policy)
+            // If target occupied, unequip it to inventory (policy); this will also clear its visual
             if (_equipped.TryGetValue(to, out var existing) && existing != null)
-                TryUnequip(to);
+                TryUnequip(to); // assumes TryUnequip calls visuals?.OnUnequipped(to)
 
+            // model state
             _equipped[from] = null;
             _equipped[to] = def;
 
+            // UI
             GetSlotUI(from)?.ShowItem(null);
             GetSlotUI(to)?.ShowItem(def);
+
+            // VISUALS
+            visuals?.OnUnequipped(from);
+            visuals?.OnEquipped(to, def as IHasItemVisual);
         }
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);

@@ -21,6 +21,19 @@ public class EquipmentSlotTooltip : MonoBehaviour, IPointerEnterHandler, IPointe
 #endif
     }
 
+    void Awake()
+    {
+        if (!orchestrator)
+        {
+#if UNITY_2023_1_OR_NEWER
+        orchestrator = FindFirstObjectByType<TooltipCompareOrchestrator>(FindObjectsInactive.Include);
+#else
+            orchestrator = Object.FindObjectOfType<TooltipCompareOrchestrator>(true);
+#endif
+        }
+    }
+
+
     public void OnPointerEnter(PointerEventData e)
     {
         if (!orchestrator || itemInstance == null || itemInstance.def == null) return;

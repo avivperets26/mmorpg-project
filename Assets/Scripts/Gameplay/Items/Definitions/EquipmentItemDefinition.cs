@@ -1,13 +1,18 @@
-// Assets/Scripts/Items/Equipment/EquipmentItemDefinition.cs
+// Assets/Scripts/Gameplay/Items/Definitions/EquipmentItemDefinition.cs
 using UnityEngine;
+using Game.Items.Definitions;
 
 namespace Game.Items
 {
     [CreateAssetMenu(menuName = "MMO/Items/Equipment Item", fileName = "EquipmentItem")]
-    public class EquipmentItemDefinition : ItemDefinition
+    public class EquipmentItemDefinition : ItemDefinition, IHasItemVisual
     {
+        [Header("Visuals (optional)")]
+        [SerializeField] private ItemVisualDefinition visual;
+        public ItemVisualDefinition Visual => visual;
+
         [Header("Equipment")]
-        public EquipmentSlot slot = EquipmentSlot.Helm;   // ← was Head
+        public EquipmentSlot slot = EquipmentSlot.Helm;
 
         [Header("Stats & Set")]
         public EquipmentStats stats = new EquipmentStats();
@@ -22,10 +27,10 @@ namespace Game.Items
 
         private void OnValidate()
         {
-            // Prefer our new mapper; if it can suggest a slot, take it.
             if (EquipmentSlotMapper.TrySuggestSlot(this, out var primary, out var _))
                 slot = primary;
-            // 'category' continues to be derived in ItemDefinition.OnValidate()
+
+            // base.OnValidate();  <-- remove this (base method is not accessible)
         }
     }
 }

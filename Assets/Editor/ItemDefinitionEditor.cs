@@ -6,6 +6,7 @@ using Game.Items; // ItemCategory, ItemSubtype, CharacterClass, etc.
 [CustomEditor(typeof(ItemDefinition), true)]
 public class ItemDefinitionEditor : Editor
 {
+    SerializedProperty visualProp; 
     // --- Cached props we draw manually ---
     SerializedProperty
         // identity
@@ -78,6 +79,9 @@ public class ItemDefinitionEditor : Editor
         // rarity
         defaultTierProp  = serializedObject.FindProperty("defaultTier");
         legacyRarityProp = serializedObject.FindProperty("legacyRarity");
+
+        if (target is Game.Items.EquipmentItemDefinition)
+            visualProp = serializedObject.FindProperty("visual");
     }
 
     public override void OnInspectorGUI()
@@ -113,6 +117,14 @@ public class ItemDefinitionEditor : Editor
                 EditorGUILayout.PropertyField(invPreviewPrefabProp, new GUIContent("Inventory Preview Prefab"));
                 EditorGUILayout.PropertyField(iconProp);
             });
+        }
+
+        // ---------------- Visuals (Equipment only) ----------------
+        if (target is Game.Items.EquipmentItemDefinition)
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Visuals (optional)", EditorStyles.boldLabel);
+            EditorGUILayout.PropertyField(visualProp, new GUIContent("Visual"));
         }
 
         // ---------------- Classification ----------------
