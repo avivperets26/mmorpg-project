@@ -1,4 +1,4 @@
-// Assets\Scripts\Gameplay\Equipment\EquipmentVisualsController.cs
+// Assets/Scripts/Gameplay/Equipment/EquipmentVisualsController.cs
 using System.Collections.Generic;
 using UnityEngine;
 using Game.Items;
@@ -23,6 +23,9 @@ namespace Game.Equipment
             CacheSockets();
         }
 
+        // --------------------------------------------------------------------
+        // Public API from EquipmentController
+        // --------------------------------------------------------------------
         public void OnEquipped(EquipmentSlot slot, IHasItemVisual def)
         {
             // remove any existing visual in this slot
@@ -32,60 +35,66 @@ namespace Game.Equipment
             var vis = def?.Visual;
             if (vis == null || vis.prefab == null) return;
 
-            // decide which socket to use:
-            //  - if the asset specified a socketName, use it
-            //  - otherwise choose by the target slot (Left/Right hand)
+            // pick a socket name
             var socketName = !string.IsNullOrEmpty(vis.socketName)
                 ? vis.socketName
-                : (slot == EquipmentSlot.LeftHand ? "LeftHand_Socket" : "RightHand_Socket");
+                : (slot == EquipmentSlot.LeftHand ? "LeftHand_Socket"
+                                                  : slot == EquipmentSlot.RightHand ? "RightHand_Socket"
+                                                                                    : null);
 
             var socket = FindSocket(socketName);
             if (!socket)
             {
-                Debug.LogWarning($"[Visuals] Socket '{socketName}' not found.");
+                Debug.LogWarning($"[Visuals] Socket '{socketName ?? "<root>"}' not found.");
                 return;
             }
 
-            // spawn and attach
+            // spawn
             var go = Instantiate(vis.prefab);
             go.name = $"{slot}_VIS_{vis.prefab.name}";
 
-            switch (vis.attachMode)
-            {
-                case VisualAttachMode.SocketStatic:
-                    Parent(go.transform, socket, vis);
-                    break;
+            // attach using our unified helper (adds HelmetOffset support, grip align, etc.)
+            AttachVisualToSocket(go.transform, slot, socket, vis);
 
-                case VisualAttachMode.SocketWithGrip:
-                    Parent(go.transform, socket, vis, gripAlign: vis.useGripAlign ? "GripAlign" : null);
-                    break;
-
-                case VisualAttachMode.SkinnedToAvatar:
-                    Parent(go.transform, socket, vis);
-                    RemapSkinned(go, vis);
-                    break;
-            }
-
+            // animator override (optional)
             ApplyAnimatorOverride(vis);
+
             _active[slot] = go;
         }
 
-
         public void OnUnequipped(EquipmentSlot slot) => Unequip(slot);
 
-        // ---- internals ----
+        // --------------------------------------------------------------------
+        // Internals
+        // --------------------------------------------------------------------
         private void Unequip(EquipmentSlot slot)
         {
             if (_active.TryGetValue(slot, out var go) && go) Destroy(go);
             _active.Remove(slot);
         }
 
-        private void Parent(Transform t, Transform socket, ItemVisualDefinition vis, string gripAlign = null)
+        /// <summary>
+        /// Parents 't' under the correct attach parent (HelmetOffset for helmets when present,
+        /// otherwise the socket), then applies per-item local offsets.
+        /// Also supports GripAlign when attachMode == SocketWithGrip.
+        /// </summary>
+        private void AttachVisualToSocket(Transform t, EquipmentSlot slot, Transform socket, ItemVisualDefinition vis)
         {
-            t.SetParent(socket, false);
-            if (!string.IsNullOrEmpty(gripAlign))
+            // Prefer a per-rig shim for helmets (single place to tune on the rig)
+            Transform attachParent = socket;
+            if (slot == EquipmentSlot.Helm || vis.slot == EquipmentSlot.Helm)
             {
-                var grip = socket.Find(gripAlign);
+                var shim = socket.Find("HelmetOffset");
+                if (shim) attachParent = shim;
+            }
+
+            // Parent first (no world-space changes)
+            t.SetParent(attachParent, false);
+
+            // Optional "GripAlign" alignment for hand-held items
+            if (vis.attachMode == VisualAttachMode.SocketWithGrip)
+            {
+                var grip = attachParent.Find("GripAlign");
                 if (grip)
                 {
                     t.localPosition = grip.localPosition;
@@ -99,9 +108,15 @@ namespace Game.Equipment
                     t.localScale = Vector3.one;
                 }
             }
+
+            // Apply per-item visual offsets (from the ItemVisualDefinition)
             t.localPosition += vis.localPosition;
             t.localRotation = t.localRotation * Quaternion.Euler(vis.localEulerAngles);
             t.localScale = Vector3.Scale(t.localScale, vis.localScale);
+
+            // If this item is skinned, remap to avatar bones
+            if (vis.attachMode == VisualAttachMode.SkinnedToAvatar)
+                RemapSkinned(t.gameObject, vis);
         }
 
         private void RemapSkinned(GameObject go, ItemVisualDefinition vis)
@@ -111,23 +126,32 @@ namespace Game.Equipment
             if (!smr) return;
 
             var map = new Dictionary<string, Transform>();
-            foreach (var t in avatarRoot.GetComponentsInChildren<Transform>(true)) map[t.name] = t;
+            foreach (var t in avatarRoot.GetComponentsInChildren<Transform>(true))
+                map[t.name] = t;
 
             var bones = smr.bones;
             for (int i = 0; i < bones.Length; i++)
-                if (bones[i] && map.TryGetValue(bones[i].name, out var repl)) bones[i] = repl;
+            {
+                if (bones[i] && map.TryGetValue(bones[i].name, out var repl))
+                    bones[i] = repl;
+            }
             smr.bones = bones;
 
             if (smr.rootBone)
             {
-                var rootName = string.IsNullOrEmpty(vis.skinnedRootBoneNameOverride) ? smr.rootBone.name : vis.skinnedRootBoneNameOverride;
-                if (map.TryGetValue(rootName, out var rb)) smr.rootBone = rb;
+                var rootName = string.IsNullOrEmpty(vis.skinnedRootBoneNameOverride)
+                    ? smr.rootBone.name
+                    : vis.skinnedRootBoneNameOverride;
+
+                if (map.TryGetValue(rootName, out var rb))
+                    smr.rootBone = rb;
             }
         }
 
         private void ApplyAnimatorOverride(ItemVisualDefinition vis)
         {
             if (!animator || !vis.animatorOverrideForThisItem) return;
+
             var aoc = new AnimatorOverrideController(animator.runtimeAnimatorController);
             var pairs = new List<KeyValuePair<AnimationClip, AnimationClip>>();
             vis.animatorOverrideForThisItem.GetOverrides(pairs);
