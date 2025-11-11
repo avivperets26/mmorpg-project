@@ -1,3 +1,4 @@
+// Assets\Scripts\Gameplay\Items\Systems\RarityRules.cs
 using UnityEngine;
 
 namespace Game.Items

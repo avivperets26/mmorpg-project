@@ -1,3 +1,4 @@
+// Assets\Scripts\UI\Widgets\InventorySlots\EquipmentSlots.cs
 using UnityEngine;
 
 namespace Game.Items

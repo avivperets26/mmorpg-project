@@ -1,3 +1,4 @@
+// Assets\Scripts\Gameplay\Items\Upgrade\UpgradeJewel.cs
 using UnityEngine;
 using Game.Items;
 
