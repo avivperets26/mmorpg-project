@@ -58,6 +58,7 @@ public class EquipmentController : MonoBehaviour
         InitSlot(EquipmentSlot.Wings, wings, "Wings");
         InitSlot(EquipmentSlot.RightHand, rightHand, "RightHand");
         InitSlot(EquipmentSlot.LeftHand, leftHand, "LeftHand");
+        if (preview) preview.Bind(this);
     }
 
     private void OnEnable() => RefreshUI();
