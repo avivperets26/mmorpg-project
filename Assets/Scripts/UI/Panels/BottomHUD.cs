@@ -90,6 +90,8 @@ public class BottomHUD : MonoBehaviour
 
     private void HandleVitalsChanged()
     {
+        Debug.Log($"[BottomHUD] HP {stats.CurrentHp}/{stats.MaxHp} | MP {stats.CurrentMp}/{stats.MaxMp}");
+
         if (hpCenterText)
             hpCenterText.text = $"{stats.CurrentHp}/{stats.MaxHp}";
 

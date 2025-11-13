@@ -213,10 +213,37 @@ public class StatAllocationUI : MonoBehaviour
 
     // ---------- [+] callbacks — immediate & permanent ----------
 
-    private void OnPlusStrength() { TrySpendAndAdd(ref playerStats.strength); }
-    private void OnPlusDexterity() { TrySpendAndAdd(ref playerStats.dexterity); }
-    private void OnPlusVitality() { TrySpendAndAdd(ref playerStats.vitality); }
-    private void OnPlusEnergy() { TrySpendAndAdd(ref playerStats.energy); }
+    private void OnPlusStrength()
+    {
+        if (!playerStats) return;
+        if (!playerStats.TrySpendPoint()) return;
+        playerStats.ApplyDelta(1, 0, 0, 0);  // +1 STR
+        RefreshAll();
+    }
+
+    private void OnPlusVitality()
+    {
+        if (!playerStats) return;
+        if (!playerStats.TrySpendPoint()) return;
+        playerStats.ApplyDelta(0, 0, 1, 0);  // +1 VIT
+        RefreshAll();
+    }
+
+    private void OnPlusDexterity()
+    {
+        if (!playerStats) return;
+        if (!playerStats.TrySpendPoint()) return;
+        playerStats.ApplyDelta(0, 1, 0, 0);  // +1 DEX
+        RefreshAll();
+    }
+
+    private void OnPlusEnergy()
+    {
+        if (!playerStats) return;
+        if (!playerStats.TrySpendPoint()) return;
+        playerStats.ApplyDelta(0, 0, 0, 1);  // +1 ENG
+        RefreshAll();
+    }
 
     private void TrySpendAndAdd(ref int statField)
     {
@@ -226,6 +253,7 @@ public class StatAllocationUI : MonoBehaviour
         if (playerStats.TrySpendPoint())
         {
             statField++;         // apply immediately (final)
+            playerStats.RecalculateCapsAndClamp();
             RefreshAll();        // rebuild numbers/details
         }
     }

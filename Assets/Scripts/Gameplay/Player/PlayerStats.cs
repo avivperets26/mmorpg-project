@@ -214,7 +214,18 @@ public class PlayerStats : MonoBehaviour
         dexterity += Mathf.Max(0, dDex);
         vitality += Mathf.Max(0, dVit);
         energy += Mathf.Max(0, dEng);
-        RecalculateCapsAndClamp();
+
+        // Recompute caps first
+        int newMaxHp = MaxHp;
+        int newMaxMp = MaxMp;
+
+        // Option A: always refill on stat spend
+        currentHp = newMaxHp;
+        currentMp = newMaxMp;
+        RaiseVitals();
+
+        // If you still want the generic clamp helper for other uses:
+        // RecalculateCapsAndClamp();  // then you can remove RaiseVitals() above
     }
 
     // ================== Public API ==================
