@@ -1,3 +1,4 @@
+// Assets/Scripts/Gameplay/Player/PlayerStats.cs
 using System;
 using UnityEngine;
 using Game.Items;
@@ -69,7 +70,6 @@ public class PlayerStats : MonoBehaviour
     public event Action OnLevelChanged;
     public event Action OnDerivedChanged;
 
-
     // --- Convenience ---
     public bool BootsEquipped => moveSpeedMultiplier > 1f;
     public float GetEffectiveMoveSpeed() => baseMoveSpeed * moveSpeedMultiplier;
@@ -78,12 +78,10 @@ public class PlayerStats : MonoBehaviour
     public int CurrentHp => currentHp;
     public int CurrentMp => currentMp;
     public int MaxHp => 100 + 10 * level + 20 * vitality; // mirrors StatAllocationUI
-    public int MaxMp => 50 + 5 * level + 15 * energy;    // mirrors StatAllocationUI
+    public int MaxMp => 50 + 5 * level + 15 * energy;      // mirrors StatAllocationUI
     public int CurrentXp => currentXp;
     public int XpToNext => xpToNext;
     public float XpNormalized => xpToNext <= 0 ? 0f : Mathf.Clamp01(currentXp / (float)xpToNext);
-
-
 
     // ---------- Unity ----------
     private void Start()
@@ -148,6 +146,7 @@ public class PlayerStats : MonoBehaviour
         equipMagicResist += Mathf.Max(0, magicResist);
         RaiseDerived();
     }
+
     public void RemoveArmor(int defense, int magicResist)
     {
         equipDefense = Mathf.Max(0, equipDefense - Mathf.Max(0, defense));
@@ -191,6 +190,7 @@ public class PlayerStats : MonoBehaviour
         equipManaOnKill += Mathf.Max(0f, mana);
         RaiseDerived();
     }
+
     public void RemoveOnKill(float hp, float mana)
     {
         equipHpOnKill = Mathf.Max(0f, equipHpOnKill - Mathf.Max(0f, hp));
@@ -208,24 +208,37 @@ public class PlayerStats : MonoBehaviour
 
     public void RefundPoint() => availableStatPoints++;
 
+    /// <summary>
+    /// Apply attribute deltas from the stat allocation UI.
+    /// NEW BEHAVIOR:
+    /// - Keeps HP/MP percentage the same instead of refilling to full.
+    ///   (So 50% HP stays 50% of the new MaxHP.)
+    /// </summary>
     public void ApplyDelta(int dStr, int dDex, int dVit, int dEng)
     {
+        // 1) Capture percentages based on current caps *before* changing stats
+        int oldMaxHp = MaxHp;
+        int oldMaxMp = MaxMp;
+
+        float hpPercent = oldMaxHp > 0 ? currentHp / (float)oldMaxHp : 1f;
+        float mpPercent = oldMaxMp > 0 ? currentMp / (float)oldMaxMp : 1f;
+
+        // 2) Apply stat changes
         strength += Mathf.Max(0, dStr);
         dexterity += Mathf.Max(0, dDex);
         vitality += Mathf.Max(0, dVit);
         energy += Mathf.Max(0, dEng);
 
-        // Recompute caps first
+        // 3) Recompute new caps
         int newMaxHp = MaxHp;
         int newMaxMp = MaxMp;
 
-        // Option A: always refill on stat spend
-        currentHp = newMaxHp;
-        currentMp = newMaxMp;
-        RaiseVitals();
+        // 4) Keep same ratios, clamped to new caps
+        currentHp = Mathf.Clamp(Mathf.RoundToInt(newMaxHp * hpPercent), 0, newMaxHp);
+        currentMp = Mathf.Clamp(Mathf.RoundToInt(newMaxMp * mpPercent), 0, newMaxMp);
 
-        // If you still want the generic clamp helper for other uses:
-        // RecalculateCapsAndClamp();  // then you can remove RaiseVitals() above
+        // 5) Notify UI
+        RaiseVitals();
     }
 
     // ================== Public API ==================
@@ -314,10 +327,16 @@ public class PlayerStats : MonoBehaviour
         int sameLevelXp = (mobLevel * 5) + 45;
         int diff = mobLevel - level;
 
-        float mult =
-            diff == 0 ? 1f :
-            diff > 0 ? (1f + 0.05f * diff) :
-                       (1f + (2f / 11f) * diff); // diff is negative
+        float mult; // diff is negative
+        if (diff == 0)
+        {
+            mult = 1f;
+        }
+        else
+        {
+            mult = diff > 0 ? (1f + 0.05f * diff) :
+                       (1f + (2f / 11f) * diff);
+        }
 
         // Prevent negatives
         int xp = Mathf.RoundToInt(sameLevelXp * Mathf.Max(0f, mult));
@@ -328,7 +347,5 @@ public class PlayerStats : MonoBehaviour
 
     private void RaiseVitals() => OnVitalsChanged?.Invoke();
     private void RaiseXP() => OnXpChanged?.Invoke();
-
     private void RaiseDerived() => OnDerivedChanged?.Invoke();
-
 }
