@@ -31,5 +31,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Local-only Terrain demo content
+Assets/TerrainDemoScene_URP/
+Assets/TerrainDemoScene_URP.meta
+
 # Unity cache/artifacts
 # Keep Assets and ProjectSettings!

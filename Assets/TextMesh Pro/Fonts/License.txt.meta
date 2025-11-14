@@ -1,8 +1,7 @@
 fileFormatVersion: 2
-guid: d82c1b31c7e74239bff1220585707d2b
-timeCreated: 1425440388
-licenseType: Store
+guid: ec16d975ef5b1c34d914fe53fab5e901
 TextScriptImporter:
+  externalObjects: {}
   userData: 
   assetBundleName: 
   assetBundleVariant: 
@@ -11,5 +10,5 @@ AssetOrigin:
   productId: 213197
   packageName: Unity Terrain - URP Demo Scene
   packageVersion: 1.0.3
-  assetPath: Assets/TextMesh Pro/Resources/LineBreaking Leading Characters.txt
+  assetPath: Assets/TextMesh Pro/Fonts/License.txt
   uploadId: 727820
