@@ -8,6 +8,11 @@
 [Mm]emoryCaptures/
 UserSettings/
 .gradle/
+
+# Unity Package Manager cache (safe to regenerate)
+Packages/PackageCache/
+
+# IDE / project files
 *.csproj
 *.sln
 *.suo
