@@ -74,8 +74,16 @@ public class ItemTooltipUI : MonoBehaviour
         _owner = null;
         _inlineCompareEnabled = false;
         if (statusBadge) statusBadge.gameObject.SetActive(false);
+
+        if (_fadeCo != null)
+        {
+            StopCoroutine(_fadeCo);
+            _fadeCo = null;
+        }
+
         UITooltipDebug.Log(enableLogs, this, _tag, "OnDisable() detached + cleared");
     }
+
 
     // ---------------- Context & inline comparison API ----------------
     public void SetContext(TooltipContext ctx)
@@ -218,9 +226,27 @@ public class ItemTooltipUI : MonoBehaviour
 
     private void StartFade(float targetAlpha)
     {
-        if (_fadeCo != null) StopCoroutine(_fadeCo);
+        // Stop any running fade
+        if (_fadeCo != null)
+        {
+            StopCoroutine(_fadeCo);
+            _fadeCo = null;
+        }
+
+        // If this GameObject is inactive or the component is disabled,
+        // we can't start a coroutine. Just snap the alpha and bail.
+        if (!isActiveAndEnabled || !gameObject.activeInHierarchy)
+        {
+            if (_cg != null)
+                _cg.alpha = targetAlpha;
+
+            return;
+        }
+
+        // Normal case during gameplay: fade via coroutine
         _fadeCo = StartCoroutine(FadeTo(targetAlpha));
     }
+
 
     private System.Collections.IEnumerator FadeTo(float target)
     {
