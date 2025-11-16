@@ -1,87 +1,97 @@
+// Assets/Scripts/UI/Widgets/Inventory/ItemPreviewHover.cs
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using Game.Items; // for ItemDefinition
 
 /// <summary>
-/// Swaps a static preview into a live preview while hovered and rotates it.
-/// On exit, eases back to original Y rotation and restores the static RT.
+/// Handles per-slot hover spin using ItemPreviewRenderer.LivePreview.
+/// Each instance only ever touches its own RawImage.
 /// </summary>
 [RequireComponent(typeof(RawImage))]
-public class ItemPreviewHover : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+public class ItemPreviewHover : MonoBehaviour,
+    IPointerEnterHandler, IPointerExitHandler
 {
-    [Header("Runtime wiring (set by InventoryUI)")]
+    [Header("Data")]
     public ItemDefinition def;
-    public int rtWidth;
-    public int rtHeight;
-    public Texture initialStaticTexture;   // the cached static RT from first render
+    public int rtWidth = 256;
+    public int rtHeight = 256;
+    public Texture initialStaticTexture; // set by InventoryUI when it creates the icon
 
-    [Header("Spin Tuning")]
-    public float spinDegreesPerSecond = 40f;     // how fast to rotate while hovered
-    public float returnDegreesPerSecond = 180f;  // how fast to return to 0 when not hovered
-    public float epsilonDegrees = 0.5f;          // when we consider "returned"
+    [Header("Spin")]
+    public float spinDegreesPerSecond = 40f;
+    public float returnDegreesPerSecond = 180f; // (unused now but kept for tuning later)
 
     private RawImage _raw;
+    private ItemPreviewRenderer.LivePreview _live;
     private bool _hovering;
 
-    // Live renderer handle/state
-    private ItemPreviewRenderer.LivePreview _live;
-    private float _yAngle; // degrees relative to base rotation
-
-    private void Awake()
+    void Awake()
     {
         _raw = GetComponent<RawImage>();
+        if (initialStaticTexture == null && _raw != null)
+            initialStaticTexture = _raw.texture;
+    }
+
+    void OnDisable()
+    {
+        StopLive();
     }
 
     public void OnPointerEnter(PointerEventData eventData)
     {
-        if (_hovering || def == null) return;
         _hovering = true;
 
-        // Start a live preview session and swap the texture
+        if (def == null || _raw == null)
+            return;
+
+        if (_live != null)
+            return; // already running
+
+        // Start a per-slot live preview
         _live = ItemPreviewRenderer.Instance.BeginLive(def, rtWidth, rtHeight);
-        _yAngle = 0f;
-        if (_live != null && _live.rt != null)
+        if (_live == null)
         {
-            _raw.texture = _live.rt;
+            // fallback: keep static
+            return;
         }
+
+        // This slot now shows the live RT
+        _raw.texture = _live.rt;
+
+        // Kick off a simple spin loop
+        StartCoroutine(SpinLoop());
     }
 
     public void OnPointerExit(PointerEventData eventData)
     {
         _hovering = false;
-        // End immediately to avoid overlapping live previews from other slots.
-        EndLiveAndRestore(immediate: true);
+        StopLive();
     }
 
-
-    private void Update()
+    private System.Collections.IEnumerator SpinLoop()
     {
-        if (_live == null) return;
-
-        if (_hovering)
+        while (_hovering && _live != null)
         {
-            _yAngle += spinDegreesPerSecond * Time.deltaTime;
-            if (_yAngle >= 360f) _yAngle -= 360f;
-        }
-        else
-        {
-            // Not hovering anymore: we now end live immediately in OnPointerExit.
-            return;
-        }
+            if (_live.modelRoot != null)
+            {
+                // Rotate around *world* Y so it always feels like left/right spin
+                _live.modelRoot.Rotate(
+                    Vector3.up,
+                    spinDegreesPerSecond * Time.deltaTime,
+                    Space.World
+                );
+            }
 
-        if (_live.modelRoot != null)
-            _live.modelRoot.rotation = Quaternion.AngleAxis(_yAngle, Vector3.up) * _live.baseWorldRotation;
+            // Render one frame into this slot's RT only
+            ItemPreviewRenderer.Instance.RenderFrame(_live);
 
-        ItemPreviewRenderer.Instance.RenderFrame(_live);
+            yield return null;
+        }
     }
 
 
-    private void OnDisable()
-    {
-        EndLiveAndRestore(immediate: true);
-    }
-
-    private void EndLiveAndRestore(bool immediate = false)
+    private void StopLive()
     {
         if (_live != null)
         {
@@ -90,8 +100,8 @@ public class ItemPreviewHover : MonoBehaviour, IPointerEnterHandler, IPointerExi
         }
 
         if (_raw != null && initialStaticTexture != null)
+        {
             _raw.texture = initialStaticTexture;
-
-        if (immediate) _yAngle = 0f;
+        }
     }
 }

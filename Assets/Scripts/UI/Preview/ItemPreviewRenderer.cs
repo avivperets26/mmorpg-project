@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 
 /// <summary>
 /// Offscreen "studio" that frames a prefab and renders it to a RenderTexture.
@@ -32,15 +33,25 @@ public class ItemPreviewRenderer : MonoBehaviour
 
     private void InitStudio()
     {
+        // Put the whole preview rig far away from the playable world
+        transform.position = new Vector3(0f, 5000f, 0f);
+
         // Layer that preview models will use
         _previewLayer = LayerMask.NameToLayer("InventoryPreview"); // -1 if missing
 
+        // --- Stage root -------------------------------------------------------
         _stage = new GameObject("Stage").transform;
         _stage.SetParent(transform, false);
+        _stage.localPosition = Vector3.zero;
+        _stage.localRotation = Quaternion.identity;
+        _stage.localScale = Vector3.one;
 
-        // --- Preview camera ------------------------------------------------
+        // --- Preview camera ---------------------------------------------------
         var camGO = new GameObject("PreviewCamera");
         camGO.transform.SetParent(transform, false);
+        camGO.transform.localPosition = new Vector3(0f, 0f, -3f);
+        camGO.transform.localRotation = Quaternion.identity;
+
         _cam = camGO.AddComponent<Camera>();
         _cam.clearFlags = CameraClearFlags.SolidColor;
         _cam.backgroundColor = new Color(0, 0, 0, 0);
@@ -49,35 +60,57 @@ public class ItemPreviewRenderer : MonoBehaviour
         _cam.nearClipPlane = 0.01f;
         _cam.farClipPlane = 100f;
 
-        // 🔐 Keep the preview camera sandboxed
-        _cam.allowHDR = false; // was true – no need for HDR here
+        // Keep the preview camera completely manual / sandboxed
+        _cam.allowHDR = false;
         _cam.allowMSAA = true;
-        _cam.enabled = false;          // never auto-render
-        _cam.cullingMask = 0;          // set per render based on the model's layer
+        _cam.enabled = false;
+        _cam.cullingMask = 0; // we set it per render based on the model's layer
 
-        // --- Key light for the preview ------------------------------------
+        // ---- URP config: NO POST PROCESSING / NO VOLUMES ---------------------
+        var urp = camGO.GetComponent<UniversalAdditionalCameraData>();
+        if (urp == null)
+            urp = camGO.AddComponent<UniversalAdditionalCameraData>();
+
+        urp.renderPostProcessing = false;          // <- critical: no exposure / bloom / etc.
+        urp.volumeLayerMask = 0;              // ignore all volumes
+        urp.renderShadows = false;
+        urp.requiresColorOption = CameraOverrideOption.Off;
+        urp.requiresDepthOption = CameraOverrideOption.Off;
+        urp.cameraStack.Clear();                   // make sure it’s not stacked anywhere
+
+        // --- Key light for the preview ---------------------------------------
         var lightGO = new GameObject("KeyLight");
         lightGO.transform.SetParent(transform, false);
-        _keyLight = lightGO.AddComponent<Light>();
-        _keyLight.type = LightType.Directional;
-        _keyLight.intensity = 1.15f;
-        _keyLight.shadowStrength = 0f;
-        _keyLight.transform.rotation = Quaternion.Euler(35f, 135f, 0f);
 
-        // 🔴 CRITICAL: make sure this light only affects the preview layer,
-        // not your whole world (this is what caused the brightness jump)
+        _keyLight = lightGO.AddComponent<Light>();
+
+        // Use a small spot light so it cannot flood the main scene
+        _keyLight.type = LightType.Spot;
+        _keyLight.range = 5f;
+        _keyLight.spotAngle = 45f;
+        _keyLight.intensity = 1.15f;
+        _keyLight.bounceIntensity = 0f;
+        _keyLight.shadowStrength = 0f;
+
+        // Position the light to nicely hit the model on the stage
+        lightGO.transform.localPosition = new Vector3(0.8f, 1.3f, -1.2f);
+        lightGO.transform.LookAt(_stage.position + new Vector3(0f, 0.4f, 0f));
+
         if (_previewLayer >= 0)
         {
             _keyLight.cullingMask = 1 << _previewLayer;
         }
         else
         {
-            // If the layer is missing, safest is to not light anything
             _keyLight.cullingMask = 0;
-            Debug.LogWarning("[ItemPreviewRenderer] Layer 'InventoryPreview' not found. " +
-                             "KeyLight cullingMask set to 0 to avoid changing world lighting.");
+            // Debug.LogWarning(
+            //     "[ItemPreviewRenderer] Layer 'InventoryPreview' not found. " +
+            //     "KeyLight cullingMask set to 0 to avoid affecting the main scene."
+            // );
         }
     }
+
+
 
     /// <summary>
     /// Backward-compatible square render. (size x size)
@@ -98,25 +131,67 @@ public class ItemPreviewRenderer : MonoBehaviour
         widthPx = Mathf.Max(64, widthPx);
         heightPx = Mathf.Max(64, heightPx);
 
-        var key = (def, widthPx, heightPx);
-        if (_cache.TryGetValue(key, out var cached) && cached && cached.IsCreated())
-            return cached;
-
         var prefab = def.inventoryPreviewPrefab ? def.inventoryPreviewPrefab : def.worldPrefab;
         if (!prefab)
         {
-            Debug.LogWarning($"[ItemPreviewRenderer] No preview/world prefab on '{def.displayName}'.");
+            // Debug.LogWarning($"[ItemPreviewRenderer] No preview/world prefab on '{def.displayName}'.");
             return null;
         }
 
+        // 🔍 DEBUG: log children on stage before we do anything
+        // Debug.Log($"[ItemPreviewRenderer] Render START def='{def.displayName}', " +
+        //           $"stageChildren(before)={_stage.childCount}");
+
+        // 🛡️ 1) Temporarily hide any existing children on the stage
+        //      (live previews, stale objects, etc.) so this render
+        //      only sees the model we are about to spawn.
+        var hiddenChildren = new List<GameObject>();
+        foreach (Transform child in _stage)
+        {
+            if (!child) continue;
+            var goChild = child.gameObject;
+            if (goChild.activeSelf)
+            {
+                hiddenChildren.Add(goChild);
+                goChild.SetActive(false);
+            }
+        }
+
+        // Debug.Log($"[ItemPreviewRenderer] Render def='{def.displayName}' " +
+        //           $"hid {hiddenChildren.Count} stage child(ren) during icon capture.");
+
+        // Debug.Log(
+        //     $"[ItemPreviewRenderer] Using prefab '{prefab.name}' for def='{def.displayName}' " +
+        //     $"(inventoryPreview? {def.inventoryPreviewPrefab == prefab})"
+        // );
+
+        // Fresh RT for this preview
         var rt = new RenderTexture(widthPx, heightPx, 24, RenderTextureFormat.ARGB32)
         {
             antiAliasing = 4
         };
         rt.Create();
+        // Debug.Log(
+        //     $"[ItemPreviewRenderer] Render def='{def.displayName}' " +
+        //     $"size={widthPx}x{heightPx}, rtID={rt.GetInstanceID()}"
+        // );
 
+        // Instance model on the stage
         var go = Instantiate(prefab, _stage);
         go.name = $"Preview_{def.displayName}";
+
+        // 🔍 DEBUG: log meshes inside this prefab
+        foreach (var r in go.GetComponentsInChildren<Renderer>(true))
+        {
+            Mesh mesh = null;
+            var mf = r.GetComponent<MeshFilter>();
+            var smr = r as SkinnedMeshRenderer;
+            if (mf != null) mesh = mf.sharedMesh;
+            else if (smr != null) mesh = smr.sharedMesh;
+
+            // Debug.Log($"[ItemPreviewRenderer] def='{def.displayName}' " +
+            //           $"child='{r.gameObject.name}' mesh='{mesh?.name ?? "null"}'");
+        }
 
         int modelLayer = (_previewLayer >= 0) ? _previewLayer : go.layer;
         SetLayerRecursively(go, modelLayer);
@@ -137,12 +212,14 @@ public class ItemPreviewRenderer : MonoBehaviour
         }
 
         float padding = def.preview != null ? def.preview.padding : 1.1f;
-        FrameModel(modelRoot, padding, (float)widthPx / heightPx);
+        float aspect = (float)widthPx / heightPx;
+        FrameModel(modelRoot, padding, aspect);
 
+        // Render into RT
         var prevTarget = _cam.targetTexture;
         _cam.targetTexture = rt;
 
-        // 🔧 Force transparent clear to guarantee alpha=0 outside the mesh, on all pipelines.
+        // Transparent clear, so no “ghost” from previous renders
         var prevActive = RenderTexture.active;
         RenderTexture.active = rt;
         GL.Clear(true, true, new Color(0f, 0f, 0f, 0f));
@@ -153,11 +230,24 @@ public class ItemPreviewRenderer : MonoBehaviour
         _cam.enabled = false;
         _cam.targetTexture = prevTarget;
 
+        // Remove our temporary preview instance
         Destroy(go);
 
-        _cache[key] = rt;
+        // 🛡️ 2) Re-enable previously hidden children (live previews, etc.)
+        for (int i = 0; i < hiddenChildren.Count; i++)
+        {
+            if (hiddenChildren[i] != null)
+                hiddenChildren[i].SetActive(true);
+        }
+
+        // Debug.Log($"[ItemPreviewRenderer] Render END def='{def.displayName}', " +
+        //           $"stageChildren(after)={_stage.childCount}");
+
         return rt;
     }
+
+
+
 
     private void FrameModel(Transform modelRoot, float padding, float aspect)
     {

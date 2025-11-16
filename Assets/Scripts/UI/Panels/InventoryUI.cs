@@ -343,7 +343,11 @@ public class InventoryUI : MonoBehaviour
             }
         }
 
-        // 3) One preview per placed item
+        // 3) One preview per placed item, **with overlap protection**
+        //    We track which cells are already used so we don't draw multiple
+        //    items into the same footprint.
+        var occupied = new bool[_cols, _rows];
+
         foreach (var it in inventory.Items)
         {
             var def = it.def;
@@ -352,6 +356,43 @@ public class InventoryUI : MonoBehaviour
 
             int w = Mathf.Max(1, it.Width);
             int h = Mathf.Max(1, it.Height);
+
+            // Check if this item’s footprint overlaps any already-occupied cell
+            bool overlaps = false;
+            for (int dy = 0; dy < h && !overlaps; dy++)
+            {
+                for (int dx = 0; dx < w; dx++)
+                {
+                    int cx = it.x + dx;
+                    int cy = it.y + dy;
+                    if (cx < 0 || cx >= _cols || cy < 0 || cy >= _rows)
+                        continue; // out-of-bounds is ignored here (can add extra logging if you want)
+
+                    if (occupied[cx, cy])
+                    {
+                        overlaps = true;
+                        break;
+                    }
+                }
+            }
+
+            if (overlaps)
+            {
+                Log($"Refresh: detected overlapping item '{def.displayName}' at ({it.x},{it.y}) size {w}x{h} – another item already occupies these cells. Skipping its preview.");
+                continue;
+            }
+
+            // Mark cells as occupied for this item
+            for (int dy = 0; dy < h; dy++)
+            {
+                for (int dx = 0; dx < w; dx++)
+                {
+                    int cx = it.x + dx;
+                    int cy = it.y + dy;
+                    if (cx < 0 || cx >= _cols || cy < 0 || cy >= _rows) continue;
+                    occupied[cx, cy] = true;
+                }
+            }
 
             // grid metrics (include padding)
             var cs = _grid.cellSize;
@@ -394,7 +435,10 @@ public class InventoryUI : MonoBehaviour
                 Destroy(container);
                 continue;
             }
-
+            Log(
+                $"Refresh: drew '{def.displayName}' at ({it.x},{it.y}) " +
+                $"size {w}x{h}, rtID={rt.GetInstanceID()}"
+            );
             // --- Item image filling the container ---
             var imgGO = new GameObject("Image", typeof(RectTransform), typeof(RawImage));
             imgGO.transform.SetParent(container.transform, false);
@@ -417,7 +461,7 @@ public class InventoryUI : MonoBehaviour
             hover.def = def;
             hover.rtWidth = rtW;
             hover.rtHeight = rtH;
-            hover.initialStaticTexture = rt;
+            hover.initialStaticTexture = rt; // THIS icon's static RT
             hover.spinDegreesPerSecond = 40f;
             hover.returnDegreesPerSecond = 180f;
 
@@ -488,6 +532,7 @@ public class InventoryUI : MonoBehaviour
             StartCoroutine(TriggerTooltipUnderCursorNextFrame());
         }
     }
+
 
     // ---------------------------------------------------------------------
     // Tooltip replay helpers

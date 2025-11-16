@@ -21,30 +21,30 @@ public class InventoryItemView : MonoBehaviour,
 
     private void OnEnable()
     {
-        Debug.Log($"[ItemView] ENABLE name='{name}' " +
-                  $"raycastTarget={raw?.raycastTarget} layer={gameObject.layer} " +
-                  $"hasDragCtrl={(dragCtrl != null)} hasItem={(item != null)} hasDef={(item?.def != null)}");
+        // Debug.Log($"[ItemView] ENABLE name='{name}' " +
+        // //           $"raycastTarget={raw?.raycastTarget} layer={gameObject.layer} " +
+        // //           $"hasDragCtrl={(dragCtrl != null)} hasItem={(item != null)} hasDef={(item?.def != null)}");
     }
 
     public void OnPointerEnter(PointerEventData e)
     {
-        Debug.Log($"[ItemView] ENTER '{name}'");
+        // Debug.Log($"[ItemView] ENTER '{name}'");
     }
 
     public void OnPointerExit(PointerEventData e)
     {
-        Debug.Log($"[ItemView] EXIT '{name}'");
+        // Debug.Log($"[ItemView] EXIT '{name}'");
     }
 
     public void OnPointerDown(PointerEventData e)
     {
-        Debug.Log($"[ItemView] DOWN '{name}' btn={e.button} pos={e.position}");
+        // Debug.Log($"[ItemView] DOWN '{name}' btn={e.button} pos={e.position}");
     }
 
     public void OnPointerClick(PointerEventData eventData)
     {
-        Debug.Log($"[ItemView] CLICK '{name}' btn={eventData.button} " +
-                  $"dragCtrlNull={(dragCtrl == null)}");
+        // Debug.Log($"[ItemView] CLICK '{name}' btn={eventData.button} " +
+        //           $"dragCtrlNull={(dragCtrl == null)}");
 
         if (eventData.button == PointerEventData.InputButton.Left)
         {
