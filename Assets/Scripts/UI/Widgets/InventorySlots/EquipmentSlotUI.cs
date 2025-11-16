@@ -75,9 +75,9 @@ public class EquipmentSlotUI : MonoBehaviour, IPointerClickHandler
             previewRaw.texture = null;
             previewRaw.color = new Color(1, 1, 1, 0);
             if (equippedTooltip) equippedTooltip.SetItem(null);    // <—
-#if UNITY_EDITOR
-            Debug.Log($"[SlotUI] ShowItem slot={_slot} → label='{label?.text}', RT=(0x0)");
-#endif
+                                                                   // #if UNITY_EDITOR
+                                                                   //             Debug.Log($"[SlotUI] ShowItem slot={_slot} → label='{label?.text}', RT=(0x0)");
+                                                                   // #endif
             return;
         }
 

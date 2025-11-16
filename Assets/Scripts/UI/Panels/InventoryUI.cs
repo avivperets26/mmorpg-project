@@ -10,7 +10,7 @@ using UnityEngine.InputSystem; // for Mouse position (safe to keep)
 /// - Builds the grid once the PlayerInventory.Data exists
 /// - Renders one preview per placed item
 /// - Maintains hover spin, drag view and tooltip hookup
-/// - Replays tooltip hover on open/refresh so it feels seamless
+/// - Replays hover tooltip when reopening so it feels seamless
 ///
 /// NOTE: Input blocking / action map switching / cursor are owned by UIBlocker
 /// attached on the InventoryPanel root. This class just opens/closes the panel
@@ -18,6 +18,19 @@ using UnityEngine.InputSystem; // for Mouse position (safe to keep)
 /// </summary>
 public class InventoryUI : MonoBehaviour
 {
+    // ---------------------------------------------------------------------
+    // Debug helpers
+    // ---------------------------------------------------------------------
+    private const bool DBG = true;
+    private static void Log(string msg)
+    {
+        if (DBG) Debug.Log("[InventoryUI] " + msg);
+    }
+
+    // ---------------------------------------------------------------------
+    // Inspector wiring
+    // ---------------------------------------------------------------------
+
     [Header("Panel")]
     [SerializeField] private GameObject inventoryPanel; // InventoryPanel root (with UIBlocker on it)
 
@@ -37,6 +50,10 @@ public class InventoryUI : MonoBehaviour
     [SerializeField] private Sprite requirementFailIcon;
     [SerializeField] private Color requirementFailTint = new Color(1f, 0f, 0f, 0.5f);
 
+    // ---------------------------------------------------------------------
+    // Internal state
+    // ---------------------------------------------------------------------
+
     // grid/cache
     private int _cols, _rows;
     private RawImage[,] _cells;
@@ -47,27 +64,42 @@ public class InventoryUI : MonoBehaviour
     // active item view containers (overlays)
     private readonly List<GameObject> _itemViews = new();
 
+    // when true, we know inventory data changed since last successful Refresh()
+    // (used so we don't build previews while panel is closed -> no brightness jump)
+    private bool _pendingRefresh = true;
+
     private bool IsOpen => inventoryPanel && inventoryPanel.activeSelf;
+
+    // ---------------------------------------------------------------------
+    // Lifecycle
+    // ---------------------------------------------------------------------
 
     private void Awake()
     {
         if (!dragController) dragController = GetComponent<InventoryDragController>();
+        Log("Awake: dragController=" + (dragController ? dragController.name : "null"));
     }
 
     private void Start()
     {
+        Log("Start: begin InitWhenReady coroutine.");
         // Build grid once inventory + data are ready
         StartCoroutine(InitWhenReady());
     }
 
     private System.Collections.IEnumerator InitWhenReady()
     {
+        Log("InitWhenReady: waiting for inventory reference...");
         // Wait until we have an inventory component
-        while (inventory == null) yield return null;
+        while (inventory == null)
+            yield return null;
 
+        Log("InitWhenReady: inventory found: " + inventory.name + ". Waiting for Data...");
         // Wait until PlayerInventory created its Data (done in its Awake)
-        while (inventory.Data == null) yield return null;
+        while (inventory.Data == null)
+            yield return null;
 
+        Log($"InitWhenReady: Data ready. Size = {inventory.Data.width}x{inventory.Data.height}");
         _cols = inventory.Data.width;
         _rows = inventory.Data.height;
 
@@ -80,35 +112,113 @@ public class InventoryUI : MonoBehaviour
 
         BuildGrid();
         _built = true;
+        Log("InitWhenReady: Grid built.");
 
         // subscribe & draw
-        inventory.Changed += Refresh;
-        Refresh();
+        inventory.Changed += OnInventoryChanged;
+        _pendingRefresh = true;
+
+        // Only build previews if the panel starts open (usually false)
+        if (IsOpen)
+        {
+            Log("InitWhenReady: panel is open at startup -> Refresh immediately.");
+            Refresh();
+        }
+        else
+        {
+            Log("InitWhenReady: panel is closed at startup -> defer Refresh.");
+        }
     }
 
-    // ------- Public API (open/close handled visually; UIBlocker does the rest) -------
+    private void OnEnable()
+    {
+        Log("OnEnable: built=" + _built + ", IsOpen=" + IsOpen);
+        if (_built && IsOpen && _pendingRefresh)
+        {
+            Log("OnEnable: pending refresh and panel open -> Refresh()");
+            Refresh();
+        }
+    }
+
+    private void OnDisable()
+    {
+        Log("OnDisable");
+        if (inventory != null)
+        {
+            inventory.Changed -= OnInventoryChanged;
+        }
+        ClearItemViews();
+    }
+
+    // ---------------------------------------------------------------------
+    // Public API (open/close handled visually; UIBlocker does the rest)
+    // ---------------------------------------------------------------------
     public void Toggle()
     {
+        // Keep Toggle logic as-is – UIPanelManager will call these via events.
         if (IsOpen) Close();
         else Open();
     }
 
     public void Open()
     {
-        if (IsOpen) return;
-        if (inventoryPanel) inventoryPanel.SetActive(true);
+        Log("Open() called. IsOpen(before)=" + IsOpen);
 
-        var cg = inventoryPanel.GetComponent<CanvasGroup>();
-        if (cg) { cg.blocksRaycasts = true; cg.interactable = true; }
+        // DO NOT early-return based on IsOpen.
+        // This method is called *because* the UIPanel has just been opened,
+        // so we should always run our visual/refresh logic.
 
-        // Tooltip replay only (UIBlocker handles guard/input/cursor)
+        // Panel GameObject might already be active because UIPanel turned it on.
+        // But if for some reason it's not, make sure it is.
+        if (inventoryPanel && !inventoryPanel.activeSelf)
+        {
+            inventoryPanel.SetActive(true);
+            Log("Open: inventoryPanel was inactive, SetActive(true).");
+        }
+
+        var cg = inventoryPanel ? inventoryPanel.GetComponent<CanvasGroup>() : null;
+        if (cg)
+        {
+            cg.blocksRaycasts = true;
+            cg.interactable = true;
+        }
+
+        Log($"Open: panel now active. built={_built}, pendingRefresh={_pendingRefresh}");
+
+        // If the grid is built, always refresh here.
+        if (_built)
+        {
+            Log("Open: calling Refresh() now.");
+            Refresh();
+        }
+        else
+        {
+            Log("Open: grid not built yet, Refresh() will be called after InitWhenReady finishes.");
+        }
+
+        // Tooltip replay (pure UX nicety)
         UiCoroutineRunner.Run(OpenAfterDelay());
     }
 
     public void Close()
     {
+        Log("Close() called. IsOpen(before)=" + IsOpen);
+
+        // Here it's OK to check IsOpen to avoid redundant work
         if (!IsOpen) return;
-        if (inventoryPanel) inventoryPanel.SetActive(false);
+
+        if (inventoryPanel)
+        {
+            inventoryPanel.SetActive(false);
+            Log("Close: inventoryPanel.SetActive(false).");
+        }
+
+        var cg = inventoryPanel ? inventoryPanel.GetComponent<CanvasGroup>() : null;
+        if (cg)
+        {
+            cg.blocksRaycasts = false;
+            cg.interactable = false;
+        }
     }
 
     private System.Collections.IEnumerator OpenAfterDelay()
@@ -121,20 +231,37 @@ public class InventoryUI : MonoBehaviour
         yield return ReplayPointerEnterUnderCursor();
     }
 
-    private void OnEnable()
+    // ---------------------------------------------------------------------
+    // Inventory change handling
+    // ---------------------------------------------------------------------
+
+    private void OnInventoryChanged()
     {
-        if (_built) Refresh();
+        // This is called whenever PlayerInventory data changes
+        _pendingRefresh = true;
+
+        int count = inventory != null && inventory.Items != null ? inventory.Items.Count : -1;
+        Log($"OnInventoryChanged: IsOpen={IsOpen}, itemCount={count}");
+
+        // Only rebuild immediately if the panel is visible
+        if (IsOpen)
+        {
+            Log("OnInventoryChanged: panel open -> Refresh()");
+            Refresh();
+        }
+        else
+        {
+            Log("OnInventoryChanged: panel closed -> defer Refresh (avoid brightness jump).");
+        }
     }
 
-    private void OnDisable()
-    {
-        if (inventory != null) inventory.Changed -= Refresh;
-        ClearItemViews();
-    }
+    // ---------------------------------------------------------------------
+    // Grid build / refresh
+    // ---------------------------------------------------------------------
 
-    // ------- Grid build / refresh -------
     private void BuildGrid()
     {
+        Log("BuildGrid: clearing children and creating slots.");
         // Clear previous slots
         for (int i = gridRoot.childCount - 1; i >= 0; i--)
             Destroy(gridRoot.GetChild(i).gameObject);
@@ -174,7 +301,24 @@ public class InventoryUI : MonoBehaviour
 
     public void Refresh()
     {
-        if (!_built || _cells == null || inventory == null) return;
+        int itemCount = inventory != null && inventory.Items != null ? inventory.Items.Count : -1;
+        Log($"Refresh() called. IsOpen={IsOpen}, built={_built}, items={itemCount}");
+
+        // IMPORTANT: do not build thumbnails when panel is closed,
+        // otherwise ItemPreviewRenderer will kick in and alter lighting.
+        if (!IsOpen)
+        {
+            Log("Refresh: panel is closed -> early return (no UI work).");
+            return;
+        }
+
+        if (!_built || _cells == null || inventory == null)
+        {
+            Log("Refresh: aborted because !_built or _cells/inventory is null.");
+            return;
+        }
+
+        _pendingRefresh = false; // UI now matches inventory state
 
         // 1) Clear previous overlays
         ClearItemViews();
@@ -246,6 +390,7 @@ public class InventoryUI : MonoBehaviour
             var rt = ItemPreviewRenderer.Instance.Render(def, rtW, rtH);
             if (rt == null || !rt.IsCreated())
             {
+                Log($"Refresh: ItemPreviewRenderer returned null/invalid RT for {def.displayName}");
                 Destroy(container);
                 continue;
             }
@@ -254,7 +399,7 @@ public class InventoryUI : MonoBehaviour
             var imgGO = new GameObject("Image", typeof(RectTransform), typeof(RawImage));
             imgGO.transform.SetParent(container.transform, false);
 
-            var imgRect = imgGO.GetComponent<RectTransform>(); // <-- keep this
+            var imgRect = imgGO.GetComponent<RectTransform>(); // keep this
             var ivRaw = imgGO.GetComponent<RawImage>();
 
             imgRect.anchorMin = Vector2.zero;
@@ -315,7 +460,7 @@ public class InventoryUI : MonoBehaviour
             bgImg.color = meetsReq ? okTint : requirementFailTint;
             bgImg.raycastTarget = false;
 
-            // ⬇️ Put background as the LAST sibling (above the item image)
+            // Put background as the LAST sibling (above the item image)
             bgRect.SetAsLastSibling();
 
             // 2) Optional fail badge (only when failing)
@@ -339,13 +484,15 @@ public class InventoryUI : MonoBehaviour
         }
 
         if (IsOpen && EventSystem.current != null)
+        {
             StartCoroutine(TriggerTooltipUnderCursorNextFrame());
+        }
     }
 
+    // ---------------------------------------------------------------------
+    // Tooltip replay helpers
+    // ---------------------------------------------------------------------
 
-
-
-    // --- Tooltip replay helpers ---
     private System.Collections.IEnumerator TriggerTooltipUnderCursorNextFrame()
     {
         yield return null; // next frame (after Refresh)
@@ -356,9 +503,9 @@ public class InventoryUI : MonoBehaviour
         // mouse position
         Vector2 pos;
 #if ENABLE_INPUT_SYSTEM
-    pos = UnityEngine.InputSystem.Mouse.current != null
-        ? UnityEngine.InputSystem.Mouse.current.position.ReadValue()
-        : (Vector2)Input.mousePosition;
+        pos = UnityEngine.InputSystem.Mouse.current != null
+            ? UnityEngine.InputSystem.Mouse.current.position.ReadValue()
+            : (Vector2)Input.mousePosition;
 #else
         pos = (Vector2)Input.mousePosition;
 #endif
@@ -371,7 +518,6 @@ public class InventoryUI : MonoBehaviour
 
         var ped = new PointerEventData(es) { position = pos };
 
-        // ⬇️ you were missing this call
         var results = new List<RaycastResult>();
         es.RaycastAll(ped, results);
 
@@ -386,7 +532,6 @@ public class InventoryUI : MonoBehaviour
             }
         }
     }
-
 
     private System.Collections.IEnumerator ReplayPointerEnterUnderCursor()
     {
@@ -427,7 +572,10 @@ public class InventoryUI : MonoBehaviour
         if (foundTip != null) foundTip.OnPointerEnter(eventData);
     }
 
-    // --- Cell highlight API (used by drag) ---
+    // ---------------------------------------------------------------------
+    // Cell highlight API (used by drag)
+    // ---------------------------------------------------------------------
+
     public void HighlightCells(int x, int y, int w, int h, Color color)
     {
         if (_cells == null) return;

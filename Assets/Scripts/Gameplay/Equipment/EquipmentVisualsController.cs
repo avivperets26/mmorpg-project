@@ -237,15 +237,15 @@ namespace Game.Equipment
             foreach (var t in socketsRoot.GetComponentsInChildren<Transform>(true))
                 _sockets[t.name] = t;
 
-#if UNITY_EDITOR
-            Debug.Log(
-                "[Visuals] Cached " + _sockets.Count +
-                " under '" + socketsRoot.name + "'. " +
-                "Head_Socket=" + _sockets.ContainsKey("Head_Socket") + ", " +
-                "LeftHand_Socket=" + _sockets.ContainsKey("LeftHand_Socket") + ", " +
-                "RightHand_Socket=" + _sockets.ContainsKey("RightHand_Socket")
-            );
-#endif
+            // #if UNITY_EDITOR
+            //             Debug.Log(
+            //                 "[Visuals] Cached " + _sockets.Count +
+            //                 " under '" + socketsRoot.name + "'. " +
+            //                 "Head_Socket=" + _sockets.ContainsKey("Head_Socket") + ", " +
+            //                 "LeftHand_Socket=" + _sockets.ContainsKey("LeftHand_Socket") + ", " +
+            //                 "RightHand_Socket=" + _sockets.ContainsKey("RightHand_Socket")
+            //             );
+            // #endif
         }
 
         private Transform FindSocket(string name) =>

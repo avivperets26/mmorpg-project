@@ -237,9 +237,9 @@ public class EquipmentController : MonoBehaviour
             var ui = GetSlotUI(kv.Key);
             if (ui) ui.ShowItem(kv.Value);
         }
-#if UNITY_EDITOR
-        Debug.Log($"[Equip] RefreshUI repaint complete (frame={Time.frameCount}).");
-#endif
+        // #if UNITY_EDITOR
+        //         Debug.Log($"[Equip] RefreshUI repaint complete (frame={Time.frameCount}).");
+        // #endif
     }
 
     [System.Diagnostics.Conditional("UNITY_EDITOR")]

@@ -232,9 +232,9 @@ public class CharacterPreviewController : MonoBehaviour
             }
         }
 
-#if UNITY_EDITOR
-    Debug.Log($"[Preview] socketsRoot='{socketsRoot.name}', avatarRoot='{avatarRoot.name}'");
-#endif
+        // #if UNITY_EDITOR
+        //     Debug.Log($"[Preview] socketsRoot='{socketsRoot.name}', avatarRoot='{avatarRoot.name}'");
+        // #endif
     }
 
 

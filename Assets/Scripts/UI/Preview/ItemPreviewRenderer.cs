@@ -32,11 +32,13 @@ public class ItemPreviewRenderer : MonoBehaviour
 
     private void InitStudio()
     {
+        // Layer that preview models will use
         _previewLayer = LayerMask.NameToLayer("InventoryPreview"); // -1 if missing
 
         _stage = new GameObject("Stage").transform;
         _stage.SetParent(transform, false);
 
+        // --- Preview camera ------------------------------------------------
         var camGO = new GameObject("PreviewCamera");
         camGO.transform.SetParent(transform, false);
         _cam = camGO.AddComponent<Camera>();
@@ -46,11 +48,14 @@ public class ItemPreviewRenderer : MonoBehaviour
         _cam.fieldOfView = 30f;
         _cam.nearClipPlane = 0.01f;
         _cam.farClipPlane = 100f;
-        _cam.allowHDR = true;
+
+        // 🔐 Keep the preview camera sandboxed
+        _cam.allowHDR = false; // was true – no need for HDR here
         _cam.allowMSAA = true;
         _cam.enabled = false;          // never auto-render
-        _cam.cullingMask = 0;          // set per render
+        _cam.cullingMask = 0;          // set per render based on the model's layer
 
+        // --- Key light for the preview ------------------------------------
         var lightGO = new GameObject("KeyLight");
         lightGO.transform.SetParent(transform, false);
         _keyLight = lightGO.AddComponent<Light>();
@@ -58,6 +63,20 @@ public class ItemPreviewRenderer : MonoBehaviour
         _keyLight.intensity = 1.15f;
         _keyLight.shadowStrength = 0f;
         _keyLight.transform.rotation = Quaternion.Euler(35f, 135f, 0f);
+
+        // 🔴 CRITICAL: make sure this light only affects the preview layer,
+        // not your whole world (this is what caused the brightness jump)
+        if (_previewLayer >= 0)
+        {
+            _keyLight.cullingMask = 1 << _previewLayer;
+        }
+        else
+        {
+            // If the layer is missing, safest is to not light anything
+            _keyLight.cullingMask = 0;
+            Debug.LogWarning("[ItemPreviewRenderer] Layer 'InventoryPreview' not found. " +
+                             "KeyLight cullingMask set to 0 to avoid changing world lighting.");
+        }
     }
 
     /// <summary>
@@ -139,7 +158,6 @@ public class ItemPreviewRenderer : MonoBehaviour
         _cache[key] = rt;
         return rt;
     }
-
 
     private void FrameModel(Transform modelRoot, float padding, float aspect)
     {
@@ -281,5 +299,4 @@ public class ItemPreviewRenderer : MonoBehaviour
             Object.Destroy(lp.rt);
         }
     }
-
 }

@@ -13,21 +13,21 @@ public static class UITooltipDebug
     public static void Log(bool localEnabled, Object ctx, string tag, string msg)
     {
         if (!Global && !localEnabled) return;
-        Debug.Log($"[TT/{tag}] {msg}", ctx);
+        // Debug.Log($"[TT/{tag}] {msg}", ctx);
     }
 
     [System.Diagnostics.Conditional("UNITY_EDITOR")]
     public static void Warn(bool localEnabled, Object ctx, string tag, string msg)
     {
         if (!Global && !localEnabled) return;
-        Debug.LogWarning($"[TT/{tag}] {msg}", ctx);
+        // Debug.LogWarning($"[TT/{tag}] {msg}", ctx);
     }
 
     [System.Diagnostics.Conditional("UNITY_EDITOR")]
     public static void Error(bool localEnabled, Object ctx, string tag, string msg)
     {
         if (!Global && !localEnabled) return;
-        Debug.LogError($"[TT/{tag}] {msg}", ctx);
+        // Debug.LogError($"[TT/{tag}] {msg}", ctx);
     }
 
 #if UNITY_EDITOR
@@ -35,7 +35,7 @@ public static class UITooltipDebug
     private static void ToggleGlobal()
     {
         Global = !Global;
-        Debug.Log($"[TT/Global] Debug {(Global ? "ENABLED" : "DISABLED")}");
+        // Debug.Log($"[TT/Global] Debug {(Global ? "ENABLED" : "DISABLED")}");
     }
 #endif
 }

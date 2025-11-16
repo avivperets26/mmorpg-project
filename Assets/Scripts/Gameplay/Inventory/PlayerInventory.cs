@@ -58,7 +58,7 @@ public class PlayerInventory : MonoBehaviour
                     if (Data.Place(candidate))
                     {
                         _items.Add(candidate);
-                        Debug.Log($"[Inventory] Added '{def.displayName}' at {x},{y}, rotated={rotated}. Count={_items.Count}");
+                        // Debug.Log($"[Inventory] Added '{def.displayName}' at {x},{y}, rotated={rotated}. Count={_items.Count}");
                         Changed?.Invoke();
                         return true;
                     }
