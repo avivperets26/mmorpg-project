@@ -43,6 +43,12 @@ public class PlayerStats : MonoBehaviour
     [SerializeField] private int currentHp;
     [SerializeField] private int currentMp;
 
+    [Header("Stamina")]
+    [SerializeField] private float maxStamina = 100f;
+    [SerializeField] private float currentStamina = 100f;
+    [Tooltip("Stamina regenerated per second while not at max.")]
+    public float staminaRegenPerSecond = 15f;
+
     [Header("Rules")]
     public bool refillOnLevelUp = true;
 
@@ -83,6 +89,12 @@ public class PlayerStats : MonoBehaviour
     public int XpToNext => xpToNext;
     public float XpNormalized => xpToNext <= 0 ? 0f : Mathf.Clamp01(currentXp / (float)xpToNext);
 
+    public float CurrentStamina => currentStamina;
+    public float MaxStamina => maxStamina;
+    public float StaminaNormalized => maxStamina <= 0f
+        ? 0f
+        : Mathf.Clamp01(currentStamina / maxStamina);
+
     // ---------- Unity ----------
     private void Start()
     {
@@ -111,8 +123,16 @@ public class PlayerStats : MonoBehaviour
                 break;
         }
 
+        // Start with full stamina
+        currentStamina = maxStamina;
+
         RaiseVitals();
         RaiseXP();
+    }
+
+    private void Update()
+    {
+        RegenerateStamina(Time.deltaTime);
     }
 
     private void OnValidate()
@@ -132,11 +152,13 @@ public class PlayerStats : MonoBehaviour
         {
             currentHp = Mathf.Min(currentHp, MaxHp);
             currentMp = Mathf.Min(currentMp, MaxMp);
+            currentStamina = Mathf.Min(currentStamina, maxStamina);
         }
     }
 
     // ---- Movement from boots ----
-    public void EquipBoots(float speedMultiplier) => moveSpeedMultiplier = Mathf.Max(speedMultiplier, 0.01f);
+    public void EquipBoots(float speedMultiplier) =>
+        moveSpeedMultiplier = Mathf.Max(speedMultiplier, 0.01f);
     public void UnequipBoots() => moveSpeedMultiplier = 1f;
 
     // ---- Armor aggregations ----
@@ -198,7 +220,7 @@ public class PlayerStats : MonoBehaviour
         RaiseDerived();
     }
 
-    // === Helpers used by the Stat UI ===
+    // === Stat UI helpers ===
     public bool TrySpendPoint()
     {
         if (availableStatPoints <= 0) return false;
@@ -210,9 +232,7 @@ public class PlayerStats : MonoBehaviour
 
     /// <summary>
     /// Apply attribute deltas from the stat allocation UI.
-    /// NEW BEHAVIOR:
-    /// - Keeps HP/MP percentage the same instead of refilling to full.
-    ///   (So 50% HP stays 50% of the new MaxHP.)
+    /// Keeps HP/MP percentage the same instead of refilling to full.
     /// </summary>
     public void ApplyDelta(int dStr, int dDex, int dVit, int dEng)
     {
@@ -287,7 +307,28 @@ public class PlayerStats : MonoBehaviour
     {
         currentHp = Mathf.Min(currentHp, MaxHp);
         currentMp = Mathf.Min(currentMp, MaxMp);
+        currentStamina = Mathf.Min(currentStamina, maxStamina);
         RaiseVitals();
+    }
+
+    // --- Stamina API ---
+    private void RegenerateStamina(float dt)
+    {
+        if (dt <= 0f) return;
+        if (currentStamina >= maxStamina) return;
+
+        currentStamina = Mathf.Min(maxStamina, currentStamina + staminaRegenPerSecond * dt);
+        RaiseVitals();
+    }
+
+    public bool TryConsumeStamina(float amount)
+    {
+        if (amount <= 0f) return true;
+        if (currentStamina < amount) return false;
+
+        currentStamina -= amount;
+        RaiseVitals();
+        return true;
     }
 
     // ====================== Internals ======================
@@ -300,6 +341,7 @@ public class PlayerStats : MonoBehaviour
         {
             currentHp = MaxHp;
             currentMp = MaxMp;
+            currentStamina = maxStamina;
             RaiseVitals();
         }
 
@@ -327,18 +369,17 @@ public class PlayerStats : MonoBehaviour
         int sameLevelXp = (mobLevel * 5) + 45;
         int diff = mobLevel - level;
 
-        float mult; // diff is negative
+        float mult;
         if (diff == 0)
         {
             mult = 1f;
         }
         else
         {
-            mult = diff > 0 ? (1f + 0.05f * diff) :
-                       (1f + (2f / 11f) * diff);
+            mult = diff > 0 ? (1f + 0.05f * diff)
+                            : (1f + (2f / 11f) * diff);
         }
 
-        // Prevent negatives
         int xp = Mathf.RoundToInt(sameLevelXp * Mathf.Max(0f, mult));
         return xp;
     }

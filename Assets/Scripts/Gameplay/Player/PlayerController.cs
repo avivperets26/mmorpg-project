@@ -1,8 +1,8 @@
+// Assets/Scripts/Gameplay/Player/PlayerController.cs
 using UnityEngine;
 using UnityEngine.InputSystem;
 using System.Collections;
 using UnityEngine.EventSystems;
-
 
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
@@ -16,7 +16,7 @@ public class PlayerController : MonoBehaviour
     public float dodgeCooldown = 0.6f;
 
     [Header("Rotation")]
-    public bool rotateWhileStrafing = true; // if true, rotate even on pure A/D input
+    public bool rotateWhileStrafing = true; // kept for future WASD support if needed
 
     [Header("Camera")]
     public Transform cameraPivot; // assign an empty child of the player
@@ -25,20 +25,44 @@ public class PlayerController : MonoBehaviour
     public LayerMask groundMask;             // Set to your Ground layer(s) only
     public float stopDistance = 0.15f;       // Distance to consider arrival
     public float faceMouseMaxDistance = 100f;
+
+    [Header("Stamina / Shield / Sprint")]
+    [Tooltip("Stamina drained per second while shield is held up.")]
+    public float shieldStaminaPerSecond = 25f;
+
+    [Tooltip("Minimum stamina required to raise the shield.")]
+    public float minStaminaToRaiseShield = 10f;
+
+    [Tooltip("Flat stamina cost for a dodge roll.")]
+    public float dodgeStaminaCost = 25f;
+
+    [Tooltip("Stamina drained per second while sprinting.")]
+    public float sprintStaminaPerSecond = 20f;
+
+    [Tooltip("Speed multiplier while sprinting.")]
+    public float sprintSpeedMultiplier = 1.5f;
+
+    [Tooltip("Minimum stamina required to *start* sprint.")]
+    public float minStaminaToSprint = 5f;
+
     private Animator animator;
 
     // Components / state
     private CharacterController cc;
     private PlayerStats stats;
 
-    // Inputs / motion
-    private Vector2 moveInput;               // WASD vector
-    private Vector3 velocity;                // vertical (gravity)
+    // Motion
+    private Vector3 velocity; // vertical (gravity)
     private bool isDodging = false;
     private bool dodgeOnCooldown = false;
 
+    // Shield & sprint state
+    private bool shieldHeld = false;
+    private bool sprintHeld = false;
+    private bool sprintApplying = false;
+
     // Click-to-move
-    private Vector2 mouseScreenPos;          // from Point action
+    private Vector2 mouseScreenPos; // from Point action
     private bool hasClickTarget = false;
     private Vector3 clickTargetWorld;
 
@@ -47,7 +71,7 @@ public class PlayerController : MonoBehaviour
 
     // === Deferred click-to-move handling ===
     private bool pendingMoveClick;
-    private InputAction.CallbackContext pendingClickCtx;
+    private InputAction.CallbackContext pendingClickCtx; // kept if you want to inspect later
 
     void Awake()
     {
@@ -55,116 +79,150 @@ public class PlayerController : MonoBehaviour
         cc = GetComponent<CharacterController>();
         stats = GetComponent<PlayerStats>();
 
-        // Sensible default if mask is unassigned
         if (groundMask.value == 0)
             groundMask = LayerMask.GetMask("Default");
     }
 
     void Update()
     {
+        // --- Handle deferred click-to-move after UI has updated ---
         if (pendingMoveClick)
         {
             pendingMoveClick = false;
 
-            if (!IsPointerOverUI())
+            if (!IsPointerOverUI() && TryGetMouseGroundPoint(out var p))
             {
-                if (TryGetMouseGroundPoint(out var p))
-                {
-                    clickTargetWorld = p;
-                    hasClickTarget = true;
-                }
+                clickTargetWorld = p;
+                hasClickTarget = true;
             }
-            // else: click was on UI, ignore
         }
+
         ApplyGravity();
 
+        // --- Shield stamina drain ---
+        if (shieldHeld && stats != null)
+        {
+            float drain = shieldStaminaPerSecond * Time.deltaTime;
+            bool ok = stats.TryConsumeStamina(drain);
+
+            if (!ok)
+            {
+                shieldHeld = false;
+                Debug.Log("Shield DOWN (stamina exhausted)");
+            }
+        }
+
+        // While dodging, ignore regular movement
         if (isDodging)
         {
             cc.Move(velocity * Time.deltaTime);
             return;
         }
 
-        bool hasKeyboardInput = moveInput.sqrMagnitude > 0.0001f;
-
-        // If keyboard is active, cancel click-to-move so they don't fight
-        if (hasKeyboardInput) { hasClickTarget = false; }
-
-        // --- Cache camera basis BEFORE any rotation this frame ---
-        var cam = Camera.main;
-        Vector3 camFwd = Vector3.forward;
-        Vector3 camRight = Vector3.right;
-        if (cam)
-        {
-            camFwd = Vector3.ProjectOnPlane(cam.transform.forward, Vector3.up).normalized;
-            camRight = Vector3.ProjectOnPlane(cam.transform.right, Vector3.up).normalized;
-        }
-
         Vector3 desiredDir = Vector3.zero;
         Vector3 motion = Vector3.zero;
 
-        // Keyboard movement
-        if (hasKeyboardInput)
+        // ===== CLICK-TO-MOVE ONLY =====
+        if (hasClickTarget)
         {
-            float effectiveMoveSpeed = stats ? stats.GetEffectiveMoveSpeed() : moveSpeed;
-            desiredDir = (camFwd * moveInput.y + camRight * moveInput.x).normalized;
-            motion = desiredDir * effectiveMoveSpeed;
-        }
-        else if (hasClickTarget)
-        {
-            Vector3 toTarget = clickTargetWorld - transform.position; toTarget.y = 0f;
+            bool sprintAppliedThisFrame = false;
+            Vector3 toTarget = clickTargetWorld - transform.position;
+            toTarget.y = 0f;
             float dist = toTarget.magnitude;
-            if (dist <= stopDistance) { hasClickTarget = false; }
-            else { desiredDir = toTarget / Mathf.Max(dist, 0.0001f); motion = desiredDir * moveSpeed; }
+
+            if (dist <= stopDistance)
+            {
+                hasClickTarget = false;
+            }
+            else
+            {
+                float effectiveMoveSpeed = moveSpeed;
+
+                // 🔹 Sprint: hold Left Ctrl while moving
+                if (sprintHeld && stats != null)
+                {
+                    float sprintCost = sprintStaminaPerSecond * Time.deltaTime;
+
+                    if (stats.TryConsumeStamina(sprintCost))
+                    {
+                        effectiveMoveSpeed *= sprintSpeedMultiplier;
+                        sprintAppliedThisFrame = true;
+                    }
+                    else
+                    {
+                        sprintHeld = false;
+                        Debug.Log("Sprint stopped (stamina exhausted)");
+                    }
+                }
+
+                desiredDir = toTarget / Mathf.Max(dist, 0.0001f);
+                motion = desiredDir * effectiveMoveSpeed;
+            }
+
+            if (sprintAppliedThisFrame && !sprintApplying)
+            {
+                Debug.Log($"Sprint applied (x{sprintSpeedMultiplier:0.00}, stamina now {stats?.CurrentStamina.ToString("F1") ?? "n/a"})");
+            }
+            else if (!sprintAppliedThisFrame && sprintApplying && sprintHeld)
+            {
+                float planarSpeed = new Vector2(motion.x, motion.z).magnitude;
+                Debug.Log($"Sprint input held but boost not applied (hasClickTarget={hasClickTarget}, planarSpeed={planarSpeed:0.00})");
+            }
+
+            sprintApplying = sprintAppliedThisFrame;
+        }
+        else
+        {
+            if (sprintApplying && sprintHeld)
+            {
+                Debug.Log("Sprint held but no click target; boost not applied this frame.");
+            }
+            sprintApplying = false;
         }
 
         // Apply movement
         cc.Move((motion + new Vector3(0f, velocity.y, 0f)) * Time.deltaTime);
+
         float horizontalSpeed = new Vector3(motion.x, 0f, motion.z).magnitude;
         if (animator) animator.SetFloat("Speed", horizontalSpeed);
 
         // Cache lastDesiredDir for dodge
-        if (desiredDir.sqrMagnitude > 0.0001f) lastDesiredDir = desiredDir;
+        if (desiredDir.sqrMagnitude > 0.0001f)
+        {
+            lastDesiredDir = desiredDir;
+        }
         else if (hasClickTarget)
         {
-            Vector3 toTarget = clickTargetWorld - transform.position; toTarget.y = 0f;
-            if (toTarget.sqrMagnitude > 0.0001f) lastDesiredDir = toTarget.normalized;
+            Vector3 toTarget = clickTargetWorld - transform.position;
+            toTarget.y = 0f;
+            if (toTarget.sqrMagnitude > 0.0001f)
+                lastDesiredDir = toTarget.normalized;
         }
 
-        // -------- Rotation rules (fixes circular drift) --------
-        bool strafingOnly = Mathf.Abs(moveInput.x) > 0.1f && Mathf.Abs(moveInput.y) < 0.1f;
+        // -------- Rotation (click-to-move) --------
+        if (hasClickTarget)
+        {
+            Vector3 toTarget = clickTargetWorld - transform.position;
+            toTarget.y = 0f;
 
-        if (hasKeyboardInput)
-        {
-            if (desiredDir.sqrMagnitude > 0.0001f && (rotateWhileStrafing || !strafingOnly))
+            if (toTarget.sqrMagnitude > 0.0001f)
             {
-                RotateTowards(desiredDir);
+                RotateTowards(toTarget.normalized);
             }
-        }
-        else
-        {
-            // Only face mouse when you're actually in click-to-move mode
-            if (hasClickTarget)
+            else if (TryGetMouseGroundPoint(out var mousePoint))
             {
-                // if you already cache target, face that; otherwise face current mouse ground point
-                Vector3 toTarget = clickTargetWorld - transform.position; toTarget.y = 0f;
-                if (toTarget.sqrMagnitude > 0.0001f)
-                {
-                    RotateTowards(toTarget.normalized);
-                }
-                else if (TryGetMouseGroundPoint(out var mousePoint))
-                {
-                    Vector3 faceDir = mousePoint - transform.position; faceDir.y = 0f;
-                    if (faceDir.sqrMagnitude > 0.0001f) RotateTowards(faceDir.normalized);
-                }
+                Vector3 faceDir = mousePoint - transform.position;
+                faceDir.y = 0f;
+                if (faceDir.sqrMagnitude > 0.0001f)
+                    RotateTowards(faceDir.normalized);
             }
-            // else: no rotation while completely idle (prevents micro-spin)
         }
     }
-
 
     void RotateTowards(Vector3 worldDir)
     {
         if (worldDir.sqrMagnitude < 0.0001f) return;
+
         Quaternion targetRot = Quaternion.LookRotation(worldDir);
         transform.rotation = Quaternion.RotateTowards(
             transform.rotation,
@@ -181,10 +239,14 @@ public class PlayerController : MonoBehaviour
 
         Ray ray = cam.ScreenPointToRay(mouseScreenPos);
 
-        // Only hit ground layers; ignore triggers
-        if (Physics.Raycast(ray, out RaycastHit hit, faceMouseMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
+        if (Physics.Raycast(
+                ray,
+                out RaycastHit hit,
+                faceMouseMaxDistance,
+                groundMask,
+                QueryTriggerInteraction.Ignore))
         {
-            // Safety: ignore if we somehow hit our own colliders
+            // Ignore hits on the player itself
             if (hit.collider && hit.collider.transform.IsChildOf(transform))
                 return false;
 
@@ -196,57 +258,64 @@ public class PlayerController : MonoBehaviour
 
     void ApplyGravity()
     {
-        // Small downward bias when grounded to keep contact
-        if (cc.isGrounded && velocity.y < 0f) velocity.y = -2f;
+        if (cc.isGrounded && velocity.y < 0f)
+            velocity.y = -2f;
+
         velocity.y += gravity * Time.deltaTime;
     }
 
     // ================= INPUT CALLBACKS =================
 
-    // WASD vector (Action: Move, Value/Vector2 with 2D Vector composite)
+    // We keep OnMove in case we ever re-enable WASD, but it does nothing now.
     public void OnMove(InputAction.CallbackContext ctx)
     {
-        if (ctx.canceled) moveInput = Vector2.zero;
-        else if (ctx.started || ctx.performed) moveInput = ctx.ReadValue<Vector2>();
+        // Intentionally unused (no WASD movement).
     }
 
-    // Mouse position (Action: Point, Pass Through, Vector2 -> Mouse/position)
     public void OnPoint(InputAction.CallbackContext ctx)
     {
         if (ctx.performed || ctx.started)
             mouseScreenPos = ctx.ReadValue<Vector2>();
     }
+
     private bool IsPointerOverUI()
     {
         if (EventSystem.current == null) return false;
-        if (EventSystem.current.IsPointerOverGameObject()) return true;
+
+        if (EventSystem.current.IsPointerOverGameObject())
+            return true;
+
         for (int i = 0; i < Input.touchCount; i++)
+        {
             if (EventSystem.current.IsPointerOverGameObject(Input.GetTouch(i).fingerId))
                 return true;
+        }
+
         return false;
     }
 
-    // Right-click (or your chosen button) to set a move target once
-    // (Action: MoveClick, Button -> Mouse/rightButton)
-    // Right-click (or your chosen button) to set a move target once
-    // (Action: MoveClick, Button -> Mouse/rightButton)
+    // LMB: click-to-move (Action: MoveClick)
     public void OnMoveClick(InputAction.CallbackContext ctx)
     {
         if (ctx.performed)
         {
-            // Defer handling to next Update so EventSystem UI state is valid
             pendingMoveClick = true;
             pendingClickCtx = ctx;
         }
     }
 
-
-
-
-    // Directional dodge in lastDesiredDir (or forward if none)
+    // Space: directional dodge
     public void OnDodge(InputAction.CallbackContext ctx)
     {
-        if (!ctx.performed || isDodging || dodgeOnCooldown) return;
+        if (!ctx.performed || isDodging || dodgeOnCooldown)
+            return;
+
+        if (stats != null && !stats.TryConsumeStamina(dodgeStaminaCost))
+        {
+            Debug.Log("Not enough stamina to dodge.");
+            return;
+        }
+
         StartCoroutine(DodgeRoutine());
     }
 
@@ -273,18 +342,103 @@ public class PlayerController : MonoBehaviour
         dodgeOnCooldown = false;
     }
 
-    public void OnPrimaryAttack(InputAction.CallbackContext ctx)
+    // RMB / main ability (Action: AbilityAttack)
+    public void OnAbilityAttack(InputAction.CallbackContext ctx)
     {
         if (!ctx.performed) return;
-        Debug.Log("Primary Attack!");
+        Debug.Log("AbilityAttack triggered - TODO: hook into combat system.");
     }
 
     public void OnEmoteWheel(InputAction.CallbackContext ctx)
     {
-        // Ignore while any blocking UI is open
         if (UiInputGuard.IsBlocked) return;
 
         if (ctx.started) Debug.Log("Emote Wheel Open");
         if (ctx.canceled) Debug.Log("Emote Wheel Close");
+    }
+
+    // Left Shift: Shield up / down (Action: Shield)
+    public void OnShield(InputAction.CallbackContext ctx)
+    {
+        if (ctx.started)
+        {
+            if (stats != null && stats.CurrentStamina >= minStaminaToRaiseShield)
+            {
+                shieldHeld = true;
+                Debug.Log("Shield UP");
+            }
+            else
+            {
+                shieldHeld = false;
+                Debug.Log("Cannot raise shield - not enough stamina.");
+            }
+        }
+        else if (ctx.canceled)
+        {
+            if (shieldHeld)
+                Debug.Log("Shield DOWN (released).");
+
+            shieldHeld = false;
+        }
+    }
+
+    // R: Parry (Action: Parry)
+    public void OnParry(InputAction.CallbackContext ctx)
+    {
+        if (!ctx.performed) return;
+
+        if (!shieldHeld)
+        {
+            Debug.Log("Parry attempted, but shield is not up.");
+            return;
+        }
+
+        Debug.Log("Parry performed - TODO: start perfect block window.");
+    }
+
+    // Left Ctrl: Sprint hold (Action: Sprint)
+    public void OnSprint(InputAction.CallbackContext ctx)
+    {
+        if (ctx.started)
+        {
+            Debug.Log($"OnSprint started (stamina={stats?.CurrentStamina.ToString("F1") ?? "n/a"}, minRequired={minStaminaToSprint})");
+            if (stats != null && stats.CurrentStamina >= minStaminaToSprint)
+            {
+                sprintHeld = true;
+                Debug.Log("Sprint HELD");
+            }
+            else
+            {
+                sprintHeld = false;
+                Debug.Log("Not enough stamina to start sprint.");
+            }
+        }
+        else if (ctx.canceled)
+        {
+            Debug.Log("OnSprint canceled input.");
+            if (sprintHeld)
+                Debug.Log("Sprint released.");
+
+            sprintHeld = false;
+        }
+    }
+
+    // Q/W/E: Potion slots (UsePotion1/2/3)
+    public void OnUsePotion1(InputAction.CallbackContext ctx)
+    {
+        if (!ctx.performed) return;
+        Debug.Log("Use Potion Slot 1 (Q) - TODO: hook to consumable system.");
+    }
+
+    public void OnUsePotion2(InputAction.CallbackContext ctx)
+    {
+        if (!ctx.performed) return;
+        Debug.Log("Use Potion Slot 2 (W) - TODO: hook to consumable system.");
+    }
+
+    public void OnUsePotion3(InputAction.CallbackContext ctx)
+    {
+        if (!ctx.performed) return;
+        Debug.Log("Use Potion Slot 3 (E) - TODO: hook to consumable system.");
     }
 }

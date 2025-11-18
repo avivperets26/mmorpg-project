@@ -11,13 +11,17 @@ public class BottomHUD : MonoBehaviour
     [SerializeField] private PlayerStats stats;
 
     [Header("XP Bar")]
-    [SerializeField] private Image expFillImage;      // BottomHUD/ExpBar/Fill (Image, Type=Filled Horizontal)
-    [SerializeField] private TMP_Text levelText;      // small label top-left of the bar
+    [SerializeField] private Image expFillImage;
+    [SerializeField] private TMP_Text levelText;
     [SerializeField] private TMP_Text expCenterText;
 
     [Header("Orbs Text")]
-    [SerializeField] private TMP_Text hpCenterText;   // centered over right orb:  [hp]/[max]
-    [SerializeField] private TMP_Text mpCenterText;   // centered over left orb:   [mp]/[max]
+    [SerializeField] private TMP_Text hpCenterText;
+    [SerializeField] private TMP_Text mpCenterText;
+
+    [Header("Stamina")]
+    [SerializeField] private TMP_Text staminaCenterText;   // "75/100"
+    [SerializeField] private Image staminaFillImage;       // thin bar Image (Filled Horizontal)
 
     [Header("Animation")]
     [SerializeField] private float expLerpDuration = 0.35f;
@@ -54,11 +58,17 @@ public class BottomHUD : MonoBehaviour
         stats.OnVitalsChanged -= HandleVitalsChanged;
     }
 
+    // 🔹 NEW: hard-refresh vitals every frame as a safety net
+    private void Update()
+    {
+        if (!stats) return;
+        HandleVitalsChanged();
+    }
+
     // --- Handlers ---
     private void HandleLevelChanged()
     {
         if (levelText) levelText.text = stats.level.ToString();
-        // When level changes, also refresh center exp text
         if (expCenterText) expCenterText.text = $"{stats.CurrentXp} / {stats.XpToNext}";
     }
 
@@ -79,7 +89,7 @@ public class BottomHUD : MonoBehaviour
         float t = 0f;
         while (t < dur)
         {
-            t += Time.unscaledDeltaTime; // UI feels better ignoring slow-mo
+            t += Time.unscaledDeltaTime;
             float p = Mathf.Clamp01(t / dur);
             expFillImage.fillAmount = Mathf.Lerp(from, to, p);
             yield return null;
@@ -90,12 +100,20 @@ public class BottomHUD : MonoBehaviour
 
     private void HandleVitalsChanged()
     {
-        // Debug.Log($"[BottomHUD] HP {stats.CurrentHp}/{stats.MaxHp} | MP {stats.CurrentMp}/{stats.MaxMp}");
+        if (!stats) return;
 
         if (hpCenterText)
             hpCenterText.text = $"{stats.CurrentHp}/{stats.MaxHp}";
 
         if (mpCenterText)
             mpCenterText.text = $"{stats.CurrentMp}/{stats.MaxMp}";
+
+        // Stamina text + bar
+        if (staminaCenterText)
+            staminaCenterText.text =
+                $"{Mathf.CeilToInt(stats.CurrentStamina)}/{Mathf.CeilToInt(stats.MaxStamina)}";
+
+        if (staminaFillImage)
+            staminaFillImage.fillAmount = stats.StaminaNormalized;
     }
 }
