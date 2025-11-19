@@ -45,10 +45,24 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
             return;
         }
 
-        var inv = interactor.GetComponent<PlayerInventory>();
+        // Try on this object, then parents, then as a fallback anywhere in the scene
+        var inv =
+            interactor.GetComponent<PlayerInventory>() ??
+            interactor.GetComponentInParent<PlayerInventory>();
+
         if (!inv)
         {
-            Debug.LogWarning("❌ No PlayerInventory found on interactor!");
+#if UNITY_2023_1_OR_NEWER
+            inv = FindFirstObjectByType<PlayerInventory>();
+#else
+            inv = FindObjectOfType<PlayerInventory>();
+#endif
+        }
+
+        if (!inv)
+        {
+            Debug.LogWarning("❌ No PlayerInventory found for interactor! " +
+                             "Make sure PlayerInventory exists in the scene.");
             return;
         }
 
@@ -62,6 +76,7 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
             Debug.Log("⚠️ Inventory full or add failed");
         }
     }
+
 
 #if UNITY_EDITOR
     void OnDrawGizmosSelected()

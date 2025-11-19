@@ -1,6 +1,8 @@
+// Assets/Scripts/UI/Widgets/Inventory/InventoryItemView.cs
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using Game.Items;
 
 [RequireComponent(typeof(RawImage))]
 public class InventoryItemView : MonoBehaviour,
@@ -22,8 +24,8 @@ public class InventoryItemView : MonoBehaviour,
     private void OnEnable()
     {
         // Debug.Log($"[ItemView] ENABLE name='{name}' " +
-        // //           $"raycastTarget={raw?.raycastTarget} layer={gameObject.layer} " +
-        // //           $"hasDragCtrl={(dragCtrl != null)} hasItem={(item != null)} hasDef={(item?.def != null)}");
+        //           $"raycastTarget={raw?.raycastTarget} layer={gameObject.layer} " +
+        //           $"hasDragCtrl={(dragCtrl != null)} hasItem={(item != null)} hasDef={(item?.def != null)}");
     }
 
     public void OnPointerEnter(PointerEventData e)
@@ -46,16 +48,43 @@ public class InventoryItemView : MonoBehaviour,
         // Debug.Log($"[ItemView] CLICK '{name}' btn={eventData.button} " +
         //           $"dragCtrlNull={(dragCtrl == null)}");
 
+        // LEFT = drag/select (existing behavior)
         if (eventData.button == PointerEventData.InputButton.Left)
         {
             dragCtrl?.OnItemClicked(this); // forwards to InventoryDragController
             return;
         }
 
+        // RIGHT = use/equip from inventory
         if (eventData.button == PointerEventData.InputButton.Right && item != null && item.def != null)
         {
-            if (equipment != null && equipment.TryEquip(item.def))
-                inventory?.Remove(item);
+            if (equipment != null)
+            {
+                bool usedOrEquipped = equipment.TryEquip(item.def, fromInventory: true);
+
+                // For now: if TryEquip / TryUsePotion returns true, remove one item from inventory.
+                // (When we add stacking, this will consume 1 stack.)
+                if (usedOrEquipped)
+                {
+                    Debug.Log($"[ItemView] Right-click use/equip succeeded for '{item.def.displayName}', removing from inventory.");
+                    if (item.def is PotionItemDefinition)
+                    {
+                        if (inventory != null && !inventory.ConsumeOne(item))
+                        {
+                            Debug.LogWarning("[ItemView] ConsumeOne failed, removing entire potion item.");
+                            inventory.Remove(item);
+                        }
+                    }
+                    else
+                    {
+                        inventory?.Remove(item);
+                    }
+                }
+                else
+                {
+                    Debug.Log($"[ItemView] Right-click use/equip FAILED for '{item.def.displayName}'.");
+                }
+            }
         }
     }
 }

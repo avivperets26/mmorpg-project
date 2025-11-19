@@ -76,11 +76,27 @@ public class OrbLiquidMaterialDriver : MonoBehaviour
 
     private void SetFill(float v)
     {
-        if (_runtimeMat) _runtimeMat.SetFloat(FillProp, v);
+        if (_runtimeMat)
+        {
+            _runtimeMat.SetFloat(FillProp, v);
+            if (liquidImage)
+            {
+                liquidImage.material = _runtimeMat; // ensure canvas picks up updated data
+                liquidImage.SetMaterialDirty();
+            }
+        }
     }
 
     private void SetSpeed(float v)
     {
-        if (_runtimeMat) _runtimeMat.SetFloat(SpeedProp, v);
+        if (_runtimeMat)
+        {
+            _runtimeMat.SetFloat(SpeedProp, v);
+            if (liquidImage)
+            {
+                liquidImage.material = _runtimeMat;
+                liquidImage.SetMaterialDirty();
+            }
+        }
     }
 }

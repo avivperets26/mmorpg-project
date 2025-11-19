@@ -1,5 +1,6 @@
 // Assets/Scripts/Equipment/EquipmentController.cs
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;            // only used in RefreshUI() log-safe repaint
 using UnityEngine;
@@ -40,6 +41,10 @@ public class EquipmentController : MonoBehaviour
     // Current equipped state (Definition-per-slot storage for now)
     private readonly Dictionary<EquipmentSlot, ItemDefinition> _equipped = new();
 
+    // Track potion coroutines so new ones replace active effects cleanly
+    private Coroutine healthPotionRoutine;
+    private Coroutine manaPotionRoutine;
+
     public event Action EquippedChanged;
     private void RaiseEquippedChanged() => EquippedChanged?.Invoke();
 
@@ -58,6 +63,7 @@ public class EquipmentController : MonoBehaviour
         InitSlot(EquipmentSlot.Wings, wings, "Wings");
         InitSlot(EquipmentSlot.RightHand, rightHand, "RightHand");
         InitSlot(EquipmentSlot.LeftHand, leftHand, "LeftHand");
+
         if (preview) preview.Bind(this);
     }
 
@@ -78,8 +84,20 @@ public class EquipmentController : MonoBehaviour
     {
         if (def == null) return false;
 
-        Debug.Log($"[Equip] TryEquip def='{def.displayName}', fromInventory={fromInventory}, frame={Time.frameCount}");
+        Debug.Log($"[Equip] TryEquip def='{def.displayName}', subtype={def.subtype}, fromInventory={fromInventory}, frame={Time.frameCount}");
 
+        // ------------------------------------------------------------------
+        // POTIONS: handle as consumables, not equippable gear
+        // ------------------------------------------------------------------
+        if (IsPotion(def))
+        {
+            Debug.Log($"[Equip] {def.displayName} detected as POTION ({def.subtype}) – routing to TryUsePotion.");
+            return TryUsePotion(def, fromInventory);
+        }
+
+        // ------------------------------------------------------------------
+        // NORMAL EQUIP LOGIC
+        // ------------------------------------------------------------------
         if (!EquipmentSlotMapper.TrySuggestSlot(def, out var primary, out var secondary))
         {
             Debug.Log($"[Equip] No slot mapping for {def?.displayName} ({def?.subtype})");
@@ -238,7 +256,7 @@ public class EquipmentController : MonoBehaviour
             if (ui) ui.ShowItem(kv.Value);
         }
         // #if UNITY_EDITOR
-        //         Debug.Log($"[Equip] RefreshUI repaint complete (frame={Time.frameCount}).");
+        // Debug.Log($"[Equip] RefreshUI repaint complete (frame={Time.frameCount}).");
         // #endif
     }
 
@@ -591,5 +609,173 @@ public class EquipmentController : MonoBehaviour
         RefreshUI();
         DumpEquipped();
         return true;
+    }
+
+    // =====================================================================
+    // POTION HELPERS
+    // =====================================================================
+    private bool IsPotion(ItemDefinition def)
+    {
+        bool result =
+            def is PotionItemDefinition ||
+            def.subtype == ItemSubtype.HealthPotion ||
+            def.subtype == ItemSubtype.ManaPotion ||
+            def.category == ItemCategory.Consumable;
+
+        Debug.Log($"[Potion] IsPotion? def='{def.displayName}', category={def.category}, subtype={def.subtype} -> {result}");
+        return result;
+    }
+
+    private bool TryUsePotion(ItemDefinition def, bool fromInventory)
+    {
+        if (!playerStats)
+        {
+            Debug.LogWarning("[Potion] No PlayerStats assigned on EquipmentController.", this);
+            return false;
+        }
+
+        switch (def.subtype)
+        {
+            case ItemSubtype.HealthPotion:
+                ApplyHealthPotion(def);
+                break;
+
+            case ItemSubtype.ManaPotion:
+                ApplyManaPotion(def);
+                break;
+
+            default:
+                Debug.LogWarning($"[Potion] Unknown potion subtype {def.subtype}", this);
+                return false;
+        }
+
+        Debug.Log($"[Potion] Used {def.displayName} (fromInventory={fromInventory})", this);
+
+        // NOTE: actual inventory removal is done by InventoryItemView
+        // (after TryEquip/TryUsePotion returns true).
+
+        return true;
+    }
+
+    private void ApplyHealthPotion(ItemDefinition def)
+    {
+        if (def is not PotionItemDefinition potion)
+        {
+            Debug.LogWarning($"[Potion] ApplyHealthPotion called with non-potion def '{def?.displayName}'");
+            return;
+        }
+
+        if (potion.instantAmount > 0)
+        {
+            playerStats.Heal(potion.instantAmount);
+            Debug.Log($"[Potion] Restored {potion.instantAmount} HP instantly from {def.displayName}.");
+        }
+
+        HandlePotionOverTime(potion, amount => playerStats.Heal(amount), isHealthPotion: true, "HP");
+    }
+
+    private void ApplyManaPotion(ItemDefinition def)
+    {
+        if (def is not PotionItemDefinition potion)
+        {
+            Debug.LogWarning($"[Potion] ApplyManaPotion called with non-potion def '{def?.displayName}'");
+            return;
+        }
+
+        if (potion.instantAmount > 0)
+        {
+            playerStats.RestoreMana(potion.instantAmount);
+            Debug.Log($"[Potion] Restored {potion.instantAmount} MP instantly from {def.displayName}.");
+        }
+
+        HandlePotionOverTime(potion, amount => playerStats.RestoreMana(amount), isHealthPotion: false, "MP");
+    }
+
+    private void HandlePotionOverTime(
+        PotionItemDefinition potion,
+        Action<int> applyAction,
+        bool isHealthPotion,
+        string resourceLabel)
+    {
+        if (potion.overTimeAmount <= 0)
+            return;
+
+        if (potion.overTimeDurationSeconds <= 0f)
+        {
+            applyAction?.Invoke(potion.overTimeAmount);
+            Debug.Log($"[Potion] Applied {potion.overTimeAmount} {resourceLabel} instantly (no duration).");
+            return;
+        }
+
+        var currentRoutine = isHealthPotion ? healthPotionRoutine : manaPotionRoutine;
+        if (currentRoutine != null)
+        {
+            StopCoroutine(currentRoutine);
+        }
+
+        var routineHandle = StartCoroutine(PotionOverTimeRoutine(
+            potion.overTimeAmount,
+            potion.overTimeDurationSeconds,
+            potion.tickIntervalSeconds,
+            applyAction,
+            resourceLabel,
+            () =>
+            {
+                if (isHealthPotion)
+                    healthPotionRoutine = null;
+                else
+                    manaPotionRoutine = null;
+            }));
+
+        if (isHealthPotion)
+            healthPotionRoutine = routineHandle;
+        else
+            manaPotionRoutine = routineHandle;
+    }
+
+    private IEnumerator PotionOverTimeRoutine(
+        int totalAmount,
+        float durationSeconds,
+        float tickIntervalSeconds,
+        Action<int> applyTick,
+        string label,
+        Action onComplete)
+    {
+        if (totalAmount <= 0 || applyTick == null)
+        {
+            onComplete?.Invoke();
+            yield break;
+        }
+
+        float interval = Mathf.Max(0.05f, tickIntervalSeconds);
+        float duration = Mathf.Max(interval, durationSeconds);
+        int ticks = Mathf.Max(1, Mathf.CeilToInt(duration / interval));
+        int applied = 0;
+
+        for (int tick = 0; tick < ticks && applied < totalAmount; tick++)
+        {
+            yield return new WaitForSeconds(interval);
+
+            int remainingTicks = ticks - tick;
+            int remainingAmount = totalAmount - applied;
+            if (remainingAmount <= 0)
+                break;
+
+            int toApply = Mathf.Max(1, Mathf.RoundToInt(remainingAmount / (float)remainingTicks));
+            toApply = Mathf.Min(toApply, remainingAmount);
+
+            applied += toApply;
+            applyTick(toApply);
+            Debug.Log($"[Potion] Over-time {label} tick {tick + 1}/{ticks} -> +{toApply}");
+        }
+
+        if (applied < totalAmount)
+        {
+            int leftover = totalAmount - applied;
+            applyTick(leftover);
+            Debug.Log($"[Potion] Applied leftover {label} amount {leftover}");
+        }
+
+        onComplete?.Invoke();
     }
 }
