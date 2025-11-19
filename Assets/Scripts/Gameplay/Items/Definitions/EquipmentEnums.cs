@@ -40,7 +40,9 @@ namespace Game.Items
         Book,      // off-hand tome
         Arrows,    // quiver
         Wings,     // back slot
-        Pet        // companion
+        Pet,        // companion
+        HealthPotion, // consumable
+        ManaPotion   // consumable
     }
 
     // ---- Helpers (kept) ----
@@ -54,6 +56,9 @@ namespace Game.Items
 
             ItemSubtype.Ring or ItemSubtype.Amulet or ItemSubtype.Wings or ItemSubtype.Pet or ItemSubtype.Orb or ItemSubtype.Book
                 => ItemCategory.Accessory,
+
+            ItemSubtype.HealthPotion or ItemSubtype.ManaPotion
+                => ItemCategory.Consumable,
 
             _ => ItemCategory.Weapon
         };

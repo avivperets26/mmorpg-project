@@ -26,16 +26,22 @@ public class ItemDefinitionEditor : Editor
         // rarity
         defaultTierProp, legacyRarityProp;
 
+    SerializedProperty potionTypeProp, potionSizeProp;
+    SerializedProperty instantAmountProp, overTimeAmountProp;
+    SerializedProperty overTimeDurationSecondsProp, tickIntervalSecondsProp;
+    SerializedProperty maxStackProp;
+
     // Foldouts (single source of truth; one section each)
     bool fIdentity     = true;
     bool fInventory    = true;
     bool fClass        = true;
     bool fRequirements = true;
-    bool fStats        = true;   // renamed meaningfully below
+    bool fStats        = true;
     bool fDurability   = true;
     bool fSockets      = true;
     bool fRarity       = true;
     bool fPreview      = false;
+    bool fPotion = true;
 
     void OnEnable()
     {
@@ -82,6 +88,23 @@ public class ItemDefinitionEditor : Editor
 
         if (target is Game.Items.EquipmentItemDefinition)
             visualProp = serializedObject.FindProperty("visual");
+
+        if (target is PotionItemDefinition)
+        {
+            potionTypeProp              = serializedObject.FindProperty("potionType");
+            potionSizeProp              = serializedObject.FindProperty("potionSize");
+            instantAmountProp           = serializedObject.FindProperty("instantAmount");
+            overTimeAmountProp          = serializedObject.FindProperty("overTimeAmount");
+            overTimeDurationSecondsProp = serializedObject.FindProperty("overTimeDurationSeconds");
+            tickIntervalSecondsProp     = serializedObject.FindProperty("tickIntervalSeconds");
+            maxStackProp                = serializedObject.FindProperty("maxStack");
+        }
+        else
+        {
+            potionTypeProp = potionSizeProp = null;
+            instantAmountProp = overTimeAmountProp =
+                overTimeDurationSecondsProp = tickIntervalSecondsProp = maxStackProp = null;
+        }
     }
 
     public override void OnInspectorGUI()
@@ -141,6 +164,34 @@ public class ItemDefinitionEditor : Editor
                 }
             });
         }
+
+        // ---------------- Potion (only for PotionItemDefinition) ------------
+        bool isPotion = target is PotionItemDefinition;
+        if (isPotion && potionTypeProp != null)
+        {
+            fPotion = FoldoutHeader(fPotion, "Potion");
+            if (fPotion)
+            {
+                Box(() =>
+                {
+                    EditorGUILayout.LabelField("General", EditorStyles.boldLabel);
+                    EditorGUILayout.PropertyField(potionTypeProp, new GUIContent("Potion Type"));
+                    EditorGUILayout.PropertyField(potionSizeProp, new GUIContent("Potion Size"));
+
+                    EditorGUILayout.Space(4);
+                    EditorGUILayout.LabelField("Healing", EditorStyles.boldLabel);
+                    EditorGUILayout.PropertyField(instantAmountProp, new GUIContent("Instant Amount"));
+                    EditorGUILayout.PropertyField(overTimeAmountProp, new GUIContent("Over-Time Amount"));
+                    EditorGUILayout.PropertyField(overTimeDurationSecondsProp, new GUIContent("Duration (sec)"));
+                    EditorGUILayout.PropertyField(tickIntervalSecondsProp, new GUIContent("Tick Interval (sec)"));
+
+                    EditorGUILayout.Space(4);
+                    EditorGUILayout.LabelField("Stacking", EditorStyles.boldLabel);
+                    EditorGUILayout.PropertyField(maxStackProp, new GUIContent("Max Stack"));
+                });
+            }
+        }
+
 
         // ---------------- Requirements ----------------
         fRequirements = FoldoutHeader(fRequirements, "Requirements");

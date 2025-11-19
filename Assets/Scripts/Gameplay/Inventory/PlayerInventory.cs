@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Game.Items;
 
 /// <summary>
 /// Player-facing API for storing items in a grid and notifying UI.
@@ -38,7 +39,30 @@ public class PlayerInventory : MonoBehaviour
             Debug.LogWarning("[Inventory] TryAdd called with null ItemDefinition");
             return false;
         }
-        // Try both orientations (not rotated, then rotated) to maximize fit.
+
+        // 🔹 1) If this is a potion, try to stack first
+        if (def is PotionItemDefinition potionDef)
+        {
+            // Look for an existing stack of this potion
+            for (int i = 0; i < _items.Count; i++)
+            {
+                var it = _items[i];
+                if (it.def == def)
+                {
+                    // Safety clamp
+                    if (it.quantity < potionDef.maxStack)
+                    {
+                        it.quantity = Mathf.Min(it.quantity + 1, potionDef.maxStack);
+                        // Debug.Log($"[Inventory] Stacked '{def.displayName}' -> qty={it.quantity}");
+                        Changed?.Invoke();
+                        return true;
+                    }
+                }
+            }
+            // If no stack found or all full, fall through to normal placement below
+        }
+
+        // 🔹 2) Normal grid placement (weapons, armor, or new stack)
         for (int pass = 0; pass < 2; pass++)
         {
             bool rotated = pass == 1;
@@ -52,7 +76,8 @@ public class PlayerInventory : MonoBehaviour
                         def = def,
                         x = x,
                         y = y,
-                        rotated = rotated
+                        rotated = rotated,
+                        quantity = 1
                     };
 
                     if (Data.Place(candidate))
@@ -125,4 +150,36 @@ public class PlayerInventory : MonoBehaviour
         _items.Clear();
         Changed?.Invoke();
     }
+
+    /// <summary>
+    /// Consumes one unit from the given stack. If quantity reaches 0, removes the item.
+    /// Returns true if something was consumed.
+    /// </summary>
+    public bool ConsumeOne(InventoryItem it)
+    {
+        if (it == null || it.def == null)
+        {
+            Debug.LogWarning("[Inventory] ConsumeOne called with null item/def");
+            return false;
+        }
+
+        if (it.quantity <= 0)
+        {
+            Debug.LogWarning("[Inventory] ConsumeOne on item with non-positive quantity");
+            return false;
+        }
+
+        it.quantity--;
+
+        if (it.quantity <= 0)
+        {
+            // Clear from grid + list
+            Data.Remove(it);
+            _items.Remove(it);
+        }
+
+        Changed?.Invoke();
+        return true;
+    }
+
 }

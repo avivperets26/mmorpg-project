@@ -9,6 +9,9 @@ public class InventoryItem
     public int y;            // top-left cell Y
     public bool rotated;     // if true, Width/Height are swapped
 
+    // Stack count (1 for non-stackables)
+    public int quantity = 1;
+
     public int Width => rotated ? def.height : def.width;
     public int Height => rotated ? def.width : def.height;
 }

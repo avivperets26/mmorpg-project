@@ -283,6 +283,8 @@ public class ItemTooltipUI : MonoBehaviour
         var def = inst.def;
         var tierColor = RarityRules.GetLabelColor(inst.tier);
 
+        bool isPotion = def is PotionItemDefinition;
+
         // ----- RARITY -----
         if (subtitleRarity)
         {
@@ -313,6 +315,19 @@ public class ItemTooltipUI : MonoBehaviour
             Destroy(lineContainer.GetChild(i).gameObject);
 
         AddSeparator();
+
+        // ----- POTION (consumable) ------------------------------------------
+        if (isPotion)
+        {
+            var potionDef = (PotionItemDefinition)def;
+            BuildPotionBody(inst, potionDef);
+
+            // Layout and early return (we’ve already built everything we want)
+            var rtPotion = (RectTransform)transform;
+            Canvas.ForceUpdateCanvases();
+            LayoutRebuilder.ForceRebuildLayoutImmediate(rtPotion);
+            return;
+        }
 
         // ----- BASE STATS (with inline deltas when enabled) -----
         if (def.category == ItemCategory.Weapon)
@@ -486,6 +501,90 @@ public class ItemTooltipUI : MonoBehaviour
         string sign = diff > 0 ? "+" : "-";
         // → "+ 2.0% ▲"
         return $"<color={col}>{sign} {val} {arrow}</color>";
+    }
+
+    // ---------------- Potions ----------------
+
+    private void BuildPotionBody(ItemInstance inst, PotionItemDefinition potion)
+    {
+        var def = inst.def;
+        // Clear lines already done before this method is called.
+
+        // 1) Type line (e.g. "Small Health Potion")
+        string typeLabel;
+        string size = potion.potionSize.ToString();   // Small / Medium / Large
+        string kind = potion.potionType == PotionType.Health ? "Health" :
+                      potion.potionType == PotionType.Mana ? "Mana" :
+                      "Potion";
+
+        typeLabel = $"{size} {kind} Potion";
+        AddLine(StatLine("Type", typeLabel));
+
+        // 2) Effect line(s)
+        string resShort = potion.potionType == PotionType.Health ? "HP" : "MP";
+
+        bool hasInstant = potion.instantAmount > 0;
+        bool hasOverTime = potion.overTimeAmount > 0 && potion.overTimeDurationSeconds > 0f;
+
+        var sb = new StringBuilder();
+
+        if (hasInstant)
+        {
+            sb.Append($"Restores {potion.instantAmount} {resShort} instantly");
+        }
+
+        if (hasInstant && hasOverTime)
+        {
+            sb.Append(" and ");
+        }
+
+        if (hasOverTime)
+        {
+            sb.Append($"restores {potion.overTimeAmount} {resShort} over {potion.overTimeDurationSeconds:0.#} sec");
+        }
+
+        if (!hasInstant && !hasOverTime)
+        {
+            sb.Append($"Restores {resShort}.");
+        }
+        else
+        {
+            sb.Append(".");
+        }
+
+        AddLine(sb.ToString());
+
+        AddSeparator(height: 10f, alpha: 0f);
+
+        // 3) Requirements (optional, like other items)
+        bool hasStats = _playerStatsForTooltip != null;
+        bool levelOk = !hasStats || _playerStatsForTooltip.level >= def.requirements.level;
+
+        var reqLevel = AddLine(StatLine("Required Level", $"{def.requirements.level}"));
+        reqLevel.color = levelOk ? new Color(0.85f, 0.85f, 0.85f) : Color.red;
+
+        AddSeparator(height: 8f, alpha: 0f);
+
+        // 4) Value line
+        var valueLine = AddLine(StatLine("Value", $"{inst.EffectiveValue} Gold"));
+        valueLine.alignment = TextAlignmentOptions.Right;
+        valueLine.fontStyle = FontStyles.Italic;
+
+        // 5) Flavor description (from def.description)
+        if (description)
+        {
+            if (!string.IsNullOrWhiteSpace(def.description))
+            {
+                description.gameObject.SetActive(true);
+                description.text = def.description;
+            }
+            else
+            {
+                description.gameObject.SetActive(false);
+            }
+        }
+
+        // Potions currently don't use blessing/sockets; skip BlessedLines().
     }
 
     // ---------------- UI line builders ----------------
