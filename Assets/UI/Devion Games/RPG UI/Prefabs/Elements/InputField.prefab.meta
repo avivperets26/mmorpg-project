@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: d0a0a27c6da32344487946f9e47222be
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 57793
+  packageName: RPG UI
+  packageVersion: 1.0.5
+  assetPath: Assets/Devion Games/RPG UI/Prefabs/Elements/InputField.prefab
+  uploadId: 420850

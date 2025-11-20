@@ -182,4 +182,29 @@ public class PlayerInventory : MonoBehaviour
         return true;
     }
 
+    /// <summary>
+    /// Convenience: consumes one unit from the first stack with the given definition.
+    /// Returns true if something was consumed.
+    /// </summary>
+    public bool ConsumeOne(ItemDefinition def)
+    {
+        if (def == null)
+        {
+            Debug.LogWarning("[Inventory] ConsumeOne(def) called with null def");
+            return false;
+        }
+
+        for (int i = 0; i < _items.Count; i++)
+        {
+            var it = _items[i];
+            if (it == null || it.def != def) continue;
+
+            // Delegate to the existing stack-based ConsumeOne
+            return ConsumeOne(it);
+        }
+
+        Debug.Log($"[Inventory] ConsumeOne(def) could not find instance of '{def.displayName}'.");
+        return false;
+    }
+
 }

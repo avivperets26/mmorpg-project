@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem; // for Mouse position (safe to keep)
+using TMPro;
 
 /// <summary>
 /// Pure inventory view/controller:
@@ -524,6 +525,33 @@ public class InventoryUI : MonoBehaviour
 
                 // keep badge on top of the overlay
                 bRect.SetAsLastSibling();
+            }
+
+            // 3) Stack count label (top-right) for stacked items
+            int stackCount = Mathf.Max(1, it.quantity);
+
+            if (stackCount > 1)
+            {
+                var countGO = new GameObject("StackCount", typeof(RectTransform));
+                countGO.transform.SetParent(container.transform, false);
+
+                var countRect = countGO.GetComponent<RectTransform>();
+                countRect.anchorMin = countRect.anchorMax = new Vector2(1f, 1f);
+                countRect.pivot = new Vector2(1f, 1f);
+                countRect.anchoredPosition = new Vector2(-4f, -4f);
+                countRect.sizeDelta = new Vector2(30f, 18f);
+
+                var tmp = countGO.AddComponent<TextMeshProUGUI>();
+                tmp.text = stackCount.ToString();
+                tmp.fontSize = 16;
+                tmp.enableAutoSizing = true;
+                tmp.alignment = TextAlignmentOptions.TopRight;
+                tmp.raycastTarget = false;
+
+                tmp.outlineWidth = 0.2f;
+                tmp.outlineColor = Color.black;
+
+                countRect.SetAsLastSibling();
             }
         }
 

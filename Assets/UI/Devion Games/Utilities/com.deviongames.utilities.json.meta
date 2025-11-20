@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 32d026049943964418f883a6ef907787
+TextScriptImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 57793
+  packageName: RPG UI
+  packageVersion: 1.0.5
+  assetPath: Assets/Devion Games/Utilities/com.deviongames.utilities.json
+  uploadId: 420850

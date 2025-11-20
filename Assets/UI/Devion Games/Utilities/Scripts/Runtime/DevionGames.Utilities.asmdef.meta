@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 907b3328f60158944b2faf1e1b0a7749
+AssemblyDefinitionImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 57793
+  packageName: RPG UI
+  packageVersion: 1.0.5
+  assetPath: Assets/Devion Games/Utilities/Scripts/Runtime/DevionGames.Utilities.asmdef
+  uploadId: 420850

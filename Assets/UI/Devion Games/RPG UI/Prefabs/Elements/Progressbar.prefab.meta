@@ -1,0 +1,14 @@
+fileFormatVersion: 2
+guid: 9f37193c4fa4ed7409b10a968e2b5895
+PrefabImporter:
+  externalObjects: {}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 57793
+  packageName: RPG UI
+  packageVersion: 1.0.5
+  assetPath: Assets/Devion Games/RPG UI/Prefabs/Elements/Progressbar.prefab
+  uploadId: 420850
