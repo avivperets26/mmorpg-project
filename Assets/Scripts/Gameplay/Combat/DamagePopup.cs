@@ -31,6 +31,7 @@ public class DamagePopup : MonoBehaviour
         if (text)
             _baseColor = text.color;
 
+        // Camera might not exist yet in Awake, so we'll also check in Update.
         if (Camera.main)
             _cam = Camera.main.transform;
     }
@@ -52,6 +53,10 @@ public class DamagePopup : MonoBehaviour
 
     private void Update()
     {
+        // Lazy-grab camera if it appeared after Awake
+        if (!_cam && Camera.main)
+            _cam = Camera.main.transform;
+
         _timeAlive += Time.deltaTime;
 
         // Move upwards

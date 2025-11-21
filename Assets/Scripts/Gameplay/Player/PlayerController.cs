@@ -7,6 +7,28 @@ using UnityEngine.EventSystems;
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
 {
+    [Header("Combat (Auto Attack)")]
+    [Tooltip("Distance in front of the player we can hit with an auto attack.")]
+    public float attackRange = 2.5f;
+
+    [Tooltip("Radius of the 'hit volume' in front of the player.")]
+    public float attackRadius = 0.7f;
+
+    [Tooltip("Layers that can be hit by auto attacks. Usually Default + Enemies + Interactable.")]
+    public LayerMask attackMask = ~0; // everything by default
+
+    [Tooltip("Fallback damage if we don't have weapon stats yet.")]
+    public int fallbackAttackDamage = 10;
+
+    [Tooltip("Animator state name for the basic attack.")]
+    public string attackAnimationState = "Attack_01";
+
+    [Tooltip("Crossfade duration when forcing the attack animation (keeps it snappy).")]
+    public float attackCrossfade = 0.05f;
+
+    [Tooltip("Delay from animation start to when the hit is applied.")]
+    public float attackHitDelay = 0.2f;
+
     [Header("Movement")]
     public float moveSpeed = 5f;
     public float rotationSpeed = 720f;
@@ -45,7 +67,6 @@ public class PlayerController : MonoBehaviour
     [Tooltip("Minimum stamina required to *start* sprint.")]
     public float minStaminaToSprint = 5f;
 
-
     [SerializeField] private float combatFadeTime = 5f;
     private float combatTimer;
     private Animator animator;
@@ -74,10 +95,17 @@ public class PlayerController : MonoBehaviour
 
     // === Deferred click-to-move handling ===
     private bool pendingMoveClick;
-    private InputAction.CallbackContext pendingClickCtx; // kept if you want to inspect later
+    private InputAction.CallbackContext pendingClickCtx; // (currently unused, but kept)
 
-    // --- Combat / animation (purely visual for now) ---
+    // --- Combat / animation (visual) ---
     private bool isInCombat;
+
+    // Auto-attack click targeting
+    private IDamageable pendingAttackTarget;
+    private Vector3 pendingAttackHitPoint;
+    private bool autoAttackOnArrival;
+
+    // -----------------------------------------------------------------------
 
     void Awake()
     {
@@ -91,15 +119,46 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
-        // --- Handle deferred click-to-move after UI has updated ---
+        // --- Handle deferred click-to-move / click-to-attack after UI has updated ---
         if (pendingMoveClick)
         {
             pendingMoveClick = false;
 
-            if (!IsPointerOverUI() && TryGetMouseGroundPoint(out var p))
+            if (IsPointerOverUI())
+                return;
+
+            var cam = Camera.main;
+            if (!cam) return;
+
+            Ray ray = cam.ScreenPointToRay(mouseScreenPos);
+
+            // We raycast against everything and then decide what it means.
+            if (Physics.Raycast(ray, out RaycastHit hit, faceMouseMaxDistance, ~0, QueryTriggerInteraction.Ignore))
             {
-                clickTargetWorld = p;
-                hasClickTarget = true;
+                // 1) Did we click something damageable?
+                IDamageable dmg = hit.collider.GetComponentInParent<IDamageable>();
+                if (dmg != null)
+                {
+                    pendingAttackTarget = dmg;
+                    pendingAttackHitPoint = hit.point;
+                    autoAttackOnArrival = true;
+
+                    // Move towards the clicked point on the XZ plane
+                    Vector3 dest = hit.point;
+                    dest.y = transform.position.y;
+
+                    clickTargetWorld = dest;
+                    hasClickTarget = true;
+                }
+                // 2) Otherwise, is this valid ground? -> normal move click.
+                else if (((1 << hit.collider.gameObject.layer) & groundMask) != 0)
+                {
+                    clickTargetWorld = hit.point;
+                    hasClickTarget = true;
+
+                    autoAttackOnArrival = false;
+                    pendingAttackTarget = null;
+                }
             }
         }
 
@@ -128,7 +187,7 @@ public class PlayerController : MonoBehaviour
         Vector3 desiredDir = Vector3.zero;
         Vector3 motion = Vector3.zero;
 
-        // ===== CLICK-TO-MOVE ONLY =====
+        // ===== CLICK-TO-MOVE (with optional auto-attack on arrival) =====
         if (hasClickTarget)
         {
             bool sprintAppliedThisFrame = false;
@@ -136,8 +195,35 @@ public class PlayerController : MonoBehaviour
             toTarget.y = 0f;
             float dist = toTarget.magnitude;
 
-            if (dist <= stopDistance)
+            // Are we chasing something we want to auto-attack?
+            bool hasPendingAttack = autoAttackOnArrival && pendingAttackTarget != null;
+
+            // If we have a pending attack and we're close enough, stop and attack.
+            if (hasPendingAttack && dist <= attackRange * 0.9f)
             {
+                hasClickTarget = false;
+
+                // Face the target *instantly* so we never swing in the wrong direction
+                Vector3 faceDir = pendingAttackTarget is Component c
+                    ? (c.transform.position - transform.position)
+                    : toTarget;
+                faceDir.y = 0f;
+
+                if (faceDir.sqrMagnitude > 0.0001f)
+                    transform.rotation = Quaternion.LookRotation(faceDir.normalized);
+
+                // Fire one auto attack
+                TriggerAutoAttack();
+
+                autoAttackOnArrival = false;
+                pendingAttackTarget = null;
+
+                // No movement this frame
+                motion = Vector3.zero;
+            }
+            else if (dist <= stopDistance)
+            {
+                // Normal arrival with no pending attack
                 hasClickTarget = false;
             }
             else
@@ -239,6 +325,68 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    // Auto attack trigger (animation + delayed hit)
+    private void TriggerAutoAttack()
+    {
+        // Enter combat pose
+        isInCombat = true;
+        combatTimer = combatFadeTime;
+
+        if (animator)
+        {
+            animator.SetBool("IsCombat", true);  // stay in combat idle/walk
+            // Force the attack animation immediately so we don't wait on long state exit times.
+            if (!string.IsNullOrEmpty(attackAnimationState))
+            {
+                animator.CrossFadeInFixedTime(
+                    attackAnimationState,
+                    Mathf.Max(0f, attackCrossfade),
+                    0,
+                    0f);
+            }
+            else
+            {
+                animator.SetTrigger("Attack"); // fallback to trigger
+            }
+        }
+
+        // Apply the actual hit slightly after the swing starts
+        StartCoroutine(PerformAutoAttackAfterDelay(attackHitDelay));
+    }
+
+    // Rotates the player to face either a clicked damageable or the clicked point.
+    private void FaceMouseClickDirection()
+    {
+        var cam = Camera.main;
+        if (!cam) return;
+
+        Ray ray = cam.ScreenPointToRay(mouseScreenPos);
+
+        if (Physics.Raycast(ray, out RaycastHit hit, faceMouseMaxDistance, ~0, QueryTriggerInteraction.Ignore))
+        {
+            Vector3 dir;
+
+            // Prefer the transform of an IDamageable (dummy, enemy, etc.)
+            IDamageable dmg = hit.collider.GetComponentInParent<IDamageable>();
+            if (dmg is Component c)
+            {
+                dir = c.transform.position - transform.position;
+            }
+            else
+            {
+                dir = hit.point - transform.position;
+            }
+
+            dir.y = 0f;
+            if (dir.sqrMagnitude > 0.0001f)
+                RotateTowards(dir.normalized);
+        }
+    }
+
     void RotateTowards(Vector3 worldDir)
     {
         if (worldDir.sqrMagnitude < 0.0001f) return;
@@ -284,7 +432,65 @@ public class PlayerController : MonoBehaviour
         velocity.y += gravity * Time.deltaTime;
     }
 
-    // ================= INPUT CALLBACKS =================
+    private IEnumerator PerformAutoAttackAfterDelay(float delay)
+    {
+        if (delay > 0f)
+            yield return new WaitForSeconds(delay);
+
+        DoAutoAttackHit();
+    }
+
+    /// <summary>
+    /// Performs a short spherecast in front of the player and deals damage to the first IDamageable hit.
+    /// </summary>
+    private void DoAutoAttackHit()
+    {
+        if (!enabled) return;
+
+        // --- Decide damage ---
+        int dmg = fallbackAttackDamage;
+
+        if (stats != null && stats.equipDamageMax > 0)
+        {
+            int min = Mathf.Max(1, stats.equipDamageMin);
+            int max = Mathf.Max(min, stats.equipDamageMax);
+            dmg = Random.Range(min, max + 1); // max is exclusive
+        }
+
+        // --- Origin & direction ---
+        // Cast from around the player's chest height so we actually intersect low dummies / enemies.
+        Vector3 origin = transform.position + Vector3.up * 1.0f;
+        Vector3 dir = transform.forward;
+
+        if (Physics.SphereCast(
+                origin,
+                attackRadius,
+                dir,
+                out RaycastHit hit,
+                attackRange,
+                attackMask,
+                QueryTriggerInteraction.Ignore))
+        {
+            // Ignore hitting ourselves
+            if (hit.collider && hit.collider.transform.IsChildOf(transform))
+                return;
+
+            IDamageable damageable = hit.collider.GetComponentInParent<IDamageable>();
+            if (damageable != null)
+            {
+                damageable.TakeHit(dmg, hit.point, hit.normal);
+                Debug.Log($"Auto attack hit {hit.collider.name} for {dmg} dmg.", hit.collider);
+            }
+        }
+        else
+        {
+            Debug.Log("Auto attack swing hit nothing.");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // INPUT CALLBACKS
+    // -----------------------------------------------------------------------
 
     // We keep OnMove in case we ever re-enable WASD, but it does nothing now.
     public void OnMove(InputAction.CallbackContext ctx)
@@ -319,6 +525,10 @@ public class PlayerController : MonoBehaviour
     {
         if (ctx.performed)
         {
+            // IMPORTANT: if Alt is held, we *don't* treat this as a move click.
+            if (Keyboard.current != null && Keyboard.current.leftAltKey.isPressed)
+                return;
+
             pendingMoveClick = true;
             pendingClickCtx = ctx;
         }
@@ -362,23 +572,32 @@ public class PlayerController : MonoBehaviour
         dodgeOnCooldown = false;
     }
 
-    // RMB / main ability (Action: AbilityAttack)
+    // Alt + LMB: basic auto attack in place (Action: BasicAttack)
+    public void OnBasicAttack(InputAction.CallbackContext ctx)
+    {
+        if (!ctx.performed) return;
+
+        // Require Alt to be held for the in-place attack override.
+        if (Keyboard.current == null || !Keyboard.current.leftAltKey.isPressed)
+            return;
+
+        // Rotate towards what we clicked (dummy or ground)
+        FaceMouseClickDirection();
+
+        // Do an auto attack in place (no movement)
+        TriggerAutoAttack();
+    }
+
+    // RMB / future special ability (Action: AbilityAttack)
     public void OnAbilityAttack(InputAction.CallbackContext ctx)
     {
         if (!ctx.performed) return;
 
-        // For now: purely visual combat mode
-        isInCombat = true;
-        combatTimer = combatFadeTime;
+        // Face the clicked target or direction
+        FaceMouseClickDirection();
 
-        if (animator)
-        {
-            // These parameter names must match the ones in KnightAnimatorController
-            animator.SetBool("IsCombat", true);  // switch to combat Idle/Walk
-            animator.SetTrigger("Attack");       // play Attack_01
-        }
-
-        Debug.Log("AbilityAttack triggered - playing attack animation (no combat logic yet).");
+        // Same auto attack behaviour for now
+        TriggerAutoAttack();
     }
 
     public void OnEmoteWheel(InputAction.CallbackContext ctx)
