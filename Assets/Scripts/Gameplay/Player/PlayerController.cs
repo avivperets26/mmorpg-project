@@ -45,6 +45,9 @@ public class PlayerController : MonoBehaviour
     [Tooltip("Minimum stamina required to *start* sprint.")]
     public float minStaminaToSprint = 5f;
 
+
+    [SerializeField] private float combatFadeTime = 5f;
+    private float combatTimer;
     private Animator animator;
 
     // Components / state
@@ -72,6 +75,9 @@ public class PlayerController : MonoBehaviour
     // === Deferred click-to-move handling ===
     private bool pendingMoveClick;
     private InputAction.CallbackContext pendingClickCtx; // kept if you want to inspect later
+
+    // --- Combat / animation (purely visual for now) ---
+    private bool isInCombat;
 
     void Awake()
     {
@@ -217,6 +223,20 @@ public class PlayerController : MonoBehaviour
                     RotateTowards(faceDir.normalized);
             }
         }
+
+        // --- simple auto-exit combat pose ---
+        if (isInCombat)
+        {
+            combatTimer -= Time.deltaTime;
+            if (combatTimer <= 0f)
+            {
+                isInCombat = false;
+                if (animator)
+                {
+                    animator.SetBool("IsCombat", false); // back to Safe_Idle / Safe_Walk
+                }
+            }
+        }
     }
 
     void RotateTowards(Vector3 worldDir)
@@ -346,7 +366,19 @@ public class PlayerController : MonoBehaviour
     public void OnAbilityAttack(InputAction.CallbackContext ctx)
     {
         if (!ctx.performed) return;
-        Debug.Log("AbilityAttack triggered - TODO: hook into combat system.");
+
+        // For now: purely visual combat mode
+        isInCombat = true;
+        combatTimer = combatFadeTime;
+
+        if (animator)
+        {
+            // These parameter names must match the ones in KnightAnimatorController
+            animator.SetBool("IsCombat", true);  // switch to combat Idle/Walk
+            animator.SetTrigger("Attack");       // play Attack_01
+        }
+
+        Debug.Log("AbilityAttack triggered - playing attack animation (no combat logic yet).");
     }
 
     public void OnEmoteWheel(InputAction.CallbackContext ctx)
