@@ -32,6 +32,10 @@ public class PlayerController : MonoBehaviour
     [Tooltip("Fallback seconds between repeated auto attacks (if the animator length can't be read).")]
     public float attackRepeatFallback = 0.9f;
 
+    [Header("Animator States")]
+    [Tooltip("Animator state for basic locomotion (idle/walk/run blend tree). Set this to your locomotion state name.")]
+    public string locomotionState = "Locomotion"; // <-- set in Inspector to your actual locomotion state
+
     [Header("Movement")]
     public float moveSpeed = 5f;
     public float rotationSpeed = 720f;
@@ -115,8 +119,9 @@ public class PlayerController : MonoBehaviour
     private IDamageable currentAttackTarget;
     private Vector3 lastAttackFaceDir;
 
-    // Attack cyc le cache
+    // Attack cycle cache
     private float lastAttackCycleDuration = 0f;
+    private float attackInputLockTimer = 0f;
 
     // -----------------------------------------------------------------------
 
@@ -152,6 +157,9 @@ public class PlayerController : MonoBehaviour
                 IDamageable dmg = hit.collider.GetComponentInParent<IDamageable>();
                 if (dmg != null)
                 {
+                    if (attackInputLockTimer > 0f && currentAttackTarget == dmg)
+                        return; // ignore spam on same target while swing is locked
+
                     pendingAttackTarget = dmg;
                     pendingAttackHitPoint = hit.point;
                     autoAttackOnArrival = true;
@@ -172,18 +180,21 @@ public class PlayerController : MonoBehaviour
                     autoAttackOnArrival = false;
                     pendingAttackTarget = null;
 
-                    // Ground click stops any running attack loop.
-                    StopAutoAttackLoop();
+                    // Ground click stops any running attack loop AND cancels attack anim.
+                    CancelCurrentAttack(resetCombatPose: false);
                 }
             }
             else
             {
                 // Missed everything; treat as cancel.
-                StopAutoAttackLoop();
+                CancelCurrentAttack(resetCombatPose: false);
             }
         }
 
         ApplyGravity();
+
+        if (attackInputLockTimer > 0f)
+            attackInputLockTimer = Mathf.Max(0f, attackInputLockTimer - Time.deltaTime);
 
         // --- Shield stamina drain ---
         if (shieldHeld && stats != null)
@@ -249,6 +260,7 @@ public class PlayerController : MonoBehaviour
             {
                 // Normal arrival with no pending attack
                 hasClickTarget = false;
+                motion = Vector3.zero; // make sure we don't move past the target
             }
             else
             {
@@ -271,8 +283,14 @@ public class PlayerController : MonoBehaviour
                     }
                 }
 
+                // Direction towards target on XZ
                 desiredDir = toTarget / Mathf.Max(dist, 0.0001f);
-                motion = desiredDir * effectiveMoveSpeed;
+
+                // --- Arrival braking ---
+                float maxStep = effectiveMoveSpeed * Time.deltaTime;
+                float targetStep = Mathf.Max(0f, dist - stopDistance);
+                float step = Mathf.Min(maxStep, targetStep);
+                motion = desiredDir * (step / Mathf.Max(Time.deltaTime, 0.0001f));
             }
 
             if (sprintAppliedThisFrame && !sprintApplying)
@@ -359,6 +377,7 @@ public class PlayerController : MonoBehaviour
         // Enter combat pose
         isInCombat = true;
         combatTimer = combatFadeTime;
+        attackInputLockTimer = Mathf.Max(attackInputLockTimer, GetAttackCycleDuration());
 
         if (animator)
         {
@@ -519,6 +538,16 @@ public class PlayerController : MonoBehaviour
     // Auto-attack helpers / loop
     // -----------------------------------------------------------------------
 
+    private bool IsInAttackState()
+    {
+        if (!animator || string.IsNullOrEmpty(attackAnimationState))
+            return false;
+
+        AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(0);
+        return info.IsName(attackAnimationState);
+    }
+
+
     private bool TryGetDamageableFromMouse(out IDamageable dmg, out Vector3 hitPoint)
     {
         dmg = null;
@@ -528,7 +557,8 @@ public class PlayerController : MonoBehaviour
         if (!cam) return false;
 
         Ray ray = cam.ScreenPointToRay(mouseScreenPos);
-        if (Physics.Raycast(ray, out RaycastHit hit, faceMouseMaxDistance, ~0, QueryTriggerInteraction.Ignore))
+        if (Physics.Raycast(ray, out RaycastHit hit, faceMouseMaxDistance, ~0,
+                QueryTriggerInteraction.Ignore))
         {
             dmg = hit.collider.GetComponentInParent<IDamageable>();
             hitPoint = hit.point;
@@ -558,6 +588,31 @@ public class PlayerController : MonoBehaviour
             attackLoopRoutine = null;
         }
     }
+    private void CancelCurrentAttack(bool resetCombatPose = false)
+    {
+        // Were we actually in an attack loop / state?
+        bool wasLooping = attackLoopActive || attackSwingInProgress;
+        bool wasInAttackState = IsInAttackState();
+
+        // Always stop the loop + clear target
+        StopAutoAttackLoop();
+
+        // Only force a crossfade if we were mid-attack
+        if (animator && (wasLooping || wasInAttackState))
+        {
+            if (!string.IsNullOrEmpty(locomotionState))
+            {
+                animator.CrossFadeInFixedTime(locomotionState, 0.1f, 0);
+            }
+        }
+
+        if (resetCombatPose && animator)
+        {
+            isInCombat = false;
+            animator.SetBool("IsCombat", false);
+        }
+    }
+
 
     private void FaceCurrentAttackTarget()
     {
@@ -600,7 +655,7 @@ public class PlayerController : MonoBehaviour
         return minDuration;
     }
 
-    // 1) Stop the loop when the target is gone / out of range
+    // Stop the loop when the target is gone / out of range
     private bool IsTargetValid()
     {
         if (!(currentAttackTarget is Component c)) return false;
@@ -689,6 +744,7 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+
     // Space: directional dodge
     public void OnDodge(InputAction.CallbackContext ctx)
     {
@@ -739,6 +795,9 @@ public class PlayerController : MonoBehaviour
         bool hasDmg = TryGetDamageableFromMouse(out var dmg, out var hitPoint);
         if (hasDmg)
         {
+            if (attackInputLockTimer > 0f && currentAttackTarget == dmg)
+                return; // ignore spam on same target mid-swing
+
             // Small safety tweak when retargeting:
             // only update target if we actually clicked a damageable.
             Vector3 dir = hitPoint - transform.position;
@@ -764,6 +823,9 @@ public class PlayerController : MonoBehaviour
         bool hasDmg = TryGetDamageableFromMouse(out var dmg, out var hitPoint);
         if (hasDmg)
         {
+            if (attackInputLockTimer > 0f && currentAttackTarget == dmg)
+                return; // ignore spam on same target mid-swing
+
             Vector3 dir = hitPoint - transform.position;
             dir.y = 0f;
             lastAttackFaceDir = dir.normalized;
@@ -779,13 +841,15 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    // 2) Optional: allow a clean “cancel attack” input (Action: AttackCancel)
-    // Bind this in your Input Actions (e.g. Escape or some key).
+    // Clean “cancel attack” input (Action: AttackCancel)
     public void OnAttackCancel(InputAction.CallbackContext ctx)
     {
         if (!ctx.performed) return;
-        StopAutoAttackLoop();
+
+        // Here we also drop combat pose if you want
+        CancelCurrentAttack(resetCombatPose: true);
     }
+
 
     public void OnEmoteWheel(InputAction.CallbackContext ctx)
     {
