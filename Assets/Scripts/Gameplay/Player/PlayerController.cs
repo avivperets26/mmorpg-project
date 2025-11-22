@@ -29,6 +29,9 @@ public class PlayerController : MonoBehaviour
     [Tooltip("Delay from animation start to when the hit is applied.")]
     public float attackHitDelay = 0.2f;
 
+    [Tooltip("Fallback seconds between repeated auto attacks (if the animator length can't be read).")]
+    public float attackRepeatFallback = 0.9f;
+
     [Header("Movement")]
     public float moveSpeed = 5f;
     public float rotationSpeed = 720f;
@@ -105,6 +108,16 @@ public class PlayerController : MonoBehaviour
     private Vector3 pendingAttackHitPoint;
     private bool autoAttackOnArrival;
 
+    // Auto-attack loop
+    private Coroutine attackLoopRoutine;
+    private bool attackLoopActive;
+    private bool attackSwingInProgress;
+    private IDamageable currentAttackTarget;
+    private Vector3 lastAttackFaceDir;
+
+    // Attack cyc le cache
+    private float lastAttackCycleDuration = 0f;
+
     // -----------------------------------------------------------------------
 
     void Awake()
@@ -158,7 +171,15 @@ public class PlayerController : MonoBehaviour
 
                     autoAttackOnArrival = false;
                     pendingAttackTarget = null;
+
+                    // Ground click stops any running attack loop.
+                    StopAutoAttackLoop();
                 }
+            }
+            else
+            {
+                // Missed everything; treat as cancel.
+                StopAutoAttackLoop();
             }
         }
 
@@ -212,8 +233,11 @@ public class PlayerController : MonoBehaviour
                 if (faceDir.sqrMagnitude > 0.0001f)
                     transform.rotation = Quaternion.LookRotation(faceDir.normalized);
 
-                // Fire one auto attack
-                TriggerAutoAttack();
+                lastAttackFaceDir = faceDir.normalized;
+                currentAttackTarget = pendingAttackTarget;
+
+                // Start looping auto attacks (first swing fires immediately)
+                StartAutoAttackLoop();
 
                 autoAttackOnArrival = false;
                 pendingAttackTarget = null;
@@ -383,7 +407,10 @@ public class PlayerController : MonoBehaviour
 
             dir.y = 0f;
             if (dir.sqrMagnitude > 0.0001f)
+            {
+                lastAttackFaceDir = dir.normalized;
                 RotateTowards(dir.normalized);
+            }
         }
     }
 
@@ -489,6 +516,134 @@ public class PlayerController : MonoBehaviour
     }
 
     // -----------------------------------------------------------------------
+    // Auto-attack helpers / loop
+    // -----------------------------------------------------------------------
+
+    private bool TryGetDamageableFromMouse(out IDamageable dmg, out Vector3 hitPoint)
+    {
+        dmg = null;
+        hitPoint = default;
+
+        var cam = Camera.main;
+        if (!cam) return false;
+
+        Ray ray = cam.ScreenPointToRay(mouseScreenPos);
+        if (Physics.Raycast(ray, out RaycastHit hit, faceMouseMaxDistance, ~0, QueryTriggerInteraction.Ignore))
+        {
+            dmg = hit.collider.GetComponentInParent<IDamageable>();
+            hitPoint = hit.point;
+            return dmg != null;
+        }
+
+        return false;
+    }
+
+    private void StartAutoAttackLoop()
+    {
+        attackLoopActive = true;
+
+        if (attackLoopRoutine == null)
+            attackLoopRoutine = StartCoroutine(AutoAttackLoop());
+    }
+
+    private void StopAutoAttackLoop()
+    {
+        attackLoopActive = false;
+        attackSwingInProgress = false;
+        currentAttackTarget = null;
+
+        if (attackLoopRoutine != null)
+        {
+            StopCoroutine(attackLoopRoutine);
+            attackLoopRoutine = null;
+        }
+    }
+
+    private void FaceCurrentAttackTarget()
+    {
+        if (currentAttackTarget is Component c)
+        {
+            Vector3 dir = c.transform.position - transform.position;
+            dir.y = 0f;
+            if (dir.sqrMagnitude > 0.0001f)
+            {
+                lastAttackFaceDir = dir.normalized;
+                RotateTowards(dir.normalized);
+                return;
+            }
+        }
+
+        if (lastAttackFaceDir.sqrMagnitude > 0.0001f)
+            RotateTowards(lastAttackFaceDir);
+    }
+
+    private float GetAttackCycleDuration()
+    {
+        // Require at least the fallback so we never get the short "first repeat" burst.
+        float minDuration = Mathf.Max(attackRepeatFallback, attackHitDelay + attackCrossfade);
+
+        if (animator && !string.IsNullOrEmpty(attackAnimationState))
+        {
+            AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(0);
+            if (info.IsName(attackAnimationState))
+            {
+                float animDuration = info.length / Mathf.Max(animator.speed, 0.0001f);
+                lastAttackCycleDuration = Mathf.Max(animDuration, minDuration);
+                return lastAttackCycleDuration;
+            }
+        }
+
+        // If we can't read the state yet (e.g., first frame after crossfade), stick to the last known duration.
+        if (lastAttackCycleDuration > 0.0001f)
+            return Mathf.Max(lastAttackCycleDuration, minDuration);
+
+        return minDuration;
+    }
+
+    // 1) Stop the loop when the target is gone / out of range
+    private bool IsTargetValid()
+    {
+        if (!(currentAttackTarget is Component c)) return false;
+
+        // Destroyed or disabled
+        if (c == null || !c.gameObject.activeInHierarchy) return false;
+
+        // Optional: stop if too far
+        Vector3 toTarget = c.transform.position - transform.position;
+        toTarget.y = 0f;
+        float dist = toTarget.magnitude;
+        return dist <= attackRange * 1.1f; // small slack
+    }
+
+    private IEnumerator AutoAttackLoop()
+    {
+        while (attackLoopActive)
+        {
+            // No valid target? Stop auto attack.
+            if (!IsTargetValid())
+            {
+                StopAutoAttackLoop();
+                yield break;
+            }
+
+            if (!attackSwingInProgress)
+            {
+                attackSwingInProgress = true;
+                FaceCurrentAttackTarget();
+                TriggerAutoAttack();
+                yield return new WaitForSeconds(GetAttackCycleDuration());
+                attackSwingInProgress = false;
+            }
+            else
+            {
+                yield return null;
+            }
+        }
+
+        attackLoopRoutine = null;
+    }
+
+    // -----------------------------------------------------------------------
     // INPUT CALLBACKS
     // -----------------------------------------------------------------------
 
@@ -581,11 +736,24 @@ public class PlayerController : MonoBehaviour
         if (Keyboard.current == null || !Keyboard.current.leftAltKey.isPressed)
             return;
 
-        // Rotate towards what we clicked (dummy or ground)
+        bool hasDmg = TryGetDamageableFromMouse(out var dmg, out var hitPoint);
+        if (hasDmg)
+        {
+            // Small safety tweak when retargeting:
+            // only update target if we actually clicked a damageable.
+            Vector3 dir = hitPoint - transform.position;
+            dir.y = 0f;
+            lastAttackFaceDir = dir.normalized;
+            currentAttackTarget = dmg;
+        }
+
         FaceMouseClickDirection();
 
-        // Do an auto attack in place (no movement)
-        TriggerAutoAttack();
+        // Only start / continue loop if we have a valid target.
+        if (hasDmg || currentAttackTarget != null)
+        {
+            StartAutoAttackLoop();
+        }
     }
 
     // RMB / future special ability (Action: AbilityAttack)
@@ -593,11 +761,30 @@ public class PlayerController : MonoBehaviour
     {
         if (!ctx.performed) return;
 
-        // Face the clicked target or direction
+        bool hasDmg = TryGetDamageableFromMouse(out var dmg, out var hitPoint);
+        if (hasDmg)
+        {
+            Vector3 dir = hitPoint - transform.position;
+            dir.y = 0f;
+            lastAttackFaceDir = dir.normalized;
+            currentAttackTarget = dmg;
+        }
+
         FaceMouseClickDirection();
 
-        // Same auto attack behaviour for now
-        TriggerAutoAttack();
+        // Only start / continue loop if we have a valid target.
+        if (hasDmg || currentAttackTarget != null)
+        {
+            StartAutoAttackLoop();
+        }
+    }
+
+    // 2) Optional: allow a clean “cancel attack” input (Action: AttackCancel)
+    // Bind this in your Input Actions (e.g. Escape or some key).
+    public void OnAttackCancel(InputAction.CallbackContext ctx)
+    {
+        if (!ctx.performed) return;
+        StopAutoAttackLoop();
     }
 
     public void OnEmoteWheel(InputAction.CallbackContext ctx)
