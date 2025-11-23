@@ -6,6 +6,7 @@ using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 using Game.Items;
+using Game.Items.Definitions;
 
 public class InventoryDragController : MonoBehaviour
 {
@@ -15,8 +16,8 @@ public class InventoryDragController : MonoBehaviour
     [SerializeField] private RectTransform gridRoot;              // same gridRoot used by InventoryUI
     [SerializeField] private Canvas canvas;                       // root canvas (for ScreenPoint->LocalPoint)
     [SerializeField] private EquipmentController equipmentController; // auto-filled if missing
-    [SerializeField] private Canvas dragCanvas;  // assign DragCanvas in Inspector
-
+    [SerializeField] private Canvas dragCanvas;                   // assign DragCanvas in Inspector
+    [SerializeField] private ItemDropManager itemDropManager;     // world-drop manager
 
     [Header("Drag Visuals")]
     [Tooltip("Scale multiplier while dragging.")]
@@ -58,7 +59,6 @@ public class InventoryDragController : MonoBehaviour
     public static bool IsDragging { get; private set; } = false;
     private EquipmentSlot? _equipSourceSlot = null;
 
-
     private void Awake()
     {
         if (!inventory)
@@ -93,6 +93,16 @@ public class InventoryDragController : MonoBehaviour
         _grid = gridRoot ? gridRoot.GetComponent<GridLayoutGroup>() : null;
         if (!_grid) Debug.LogError("[InventoryDragController] gridRoot must have GridLayoutGroup.");
         if (!canvas) Debug.LogError("[InventoryDragController] Please assign the root Canvas.");
+
+        if (!itemDropManager)
+        {
+#if UNITY_2023_1_OR_NEWER
+            itemDropManager = Object.FindFirstObjectByType<ItemDropManager>();
+#else
+            itemDropManager = Object.FindObjectOfType<ItemDropManager>();
+#endif
+            if (!itemDropManager) Debug.LogWarning("[Drag] Awake: ItemDropManager not found in scene.");
+        }
     }
 
     private void Update()
@@ -116,21 +126,29 @@ public class InventoryDragController : MonoBehaviour
             _ghostRect.anchoredPosition = localCanvas + new Vector2(0f, dragYOffset);
         }
 
-        // Candidate cell (grid space)
-        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                gridRoot, mouse, canvas.worldCamera, out var localGrid))
-            return;
+        // Candidate cell (grid space) – we still compute this even if we might drop to world,
+        // because we need it for grid placement case.
+        bool overGridRect = RectTransformUtility.ScreenPointToLocalPointInRectangle(
+            gridRoot, mouse, canvas.worldCamera, out var localGrid);
 
-        var (cellX, cellY) = LocalToCell(localGrid);
-        ClampTopLeftForItem(ref cellX, ref cellY, _pickedItem);
+        int cellX = 0, cellY = 0;
+        bool fit = false;
 
-        // Update footprint overlay and cell dimming (footprint rect itself hidden)
-        var fit = PreviewFootprintAt(cellX, cellY, _pickedItem);
-        if (_footprintImg) _footprintImg.enabled = false;
+        if (overGridRect)
+        {
+            var cell = LocalToCell(localGrid);
+            cellX = cell.x;
+            cellY = cell.y;
+            ClampTopLeftForItem(ref cellX, ref cellY, _pickedItem);
 
-        inventoryUI.ClearHighlights();
-        Color dim = fit ? new Color(0f, 0f, 0f, 0.5f) : new Color(0.5f, 0f, 0f, 0.5f);
-        inventoryUI.HighlightCells(cellX, cellY, _pickedItem.Width, _pickedItem.Height, dim);
+            // Update footprint overlay and cell dimming (footprint rect itself hidden)
+            fit = PreviewFootprintAt(cellX, cellY, _pickedItem);
+            if (_footprintImg) _footprintImg.enabled = false;
+
+            inventoryUI.ClearHighlights();
+            Color dim = fit ? new Color(0f, 0f, 0f, 0.5f) : new Color(0.5f, 0f, 0f, 0.5f);
+            inventoryUI.HighlightCells(cellX, cellY, _pickedItem.Width, _pickedItem.Height, dim);
+        }
 
         // Equipment hover (turns slot green/red while hovering)
         UpdateEquipmentHover(_pickedDef);
@@ -153,18 +171,26 @@ public class InventoryDragController : MonoBehaviour
         // Place/equip on left-click release (after debounce)
         if (LeftClickReleased() && Time.frameCount >= _suppressReleaseUntilFrame)
         {
-
             // 1) Try to drop onto an equipment slot under the cursor
             if (TryEquipViaDropAtCursor())
             {
-                inventoryUI.ClearHighlights();
-                EndDrag(commit: true);
-                inventoryUI.Refresh();
+                // TryEquipViaDropAtCursor already handles EndDrag/Refresh on success.
                 return;
             }
 
-            // 2) Otherwise, try to place back into the grid
-            TryPlace(cellX, cellY);
+            // 2) If released over the grid, try to place back into the grid,
+            // otherwise treat as drop into the world.
+            bool overGrid = RectTransformUtility.RectangleContainsScreenPoint(
+                gridRoot, MousePos(), canvas.worldCamera);
+
+            if (overGrid && overGridRect)
+            {
+                TryPlace(cellX, cellY);
+            }
+            else
+            {
+                TryDropToWorld();
+            }
         }
     }
 
@@ -173,6 +199,7 @@ public class InventoryDragController : MonoBehaviour
         if (!_dragging) BeginDrag(view);
         else Debug.Log("[Drag] OnItemClicked ignored: already dragging.");
     }
+
     private void OnDisable()
     {
         if (_dragging)
@@ -198,7 +225,7 @@ public class InventoryDragController : MonoBehaviour
 
         _pickedView = view;               // transient
         _pickedItem = view.item;          // persist
-        _pickedDef = view.item.def;      // persist
+        _pickedDef = view.item.def;       // persist
         inventoryUI.dragHiddenItem = _pickedItem;
 
         _origX = _pickedItem.x;
@@ -300,7 +327,7 @@ public class InventoryDragController : MonoBehaviour
     }
 
     // ---------- Drop-to-equip ----------
-    // Replace TryEquipViaDropAtCursor() with the version below (or edit the body accordingly)
+    // This version handles equip/unequip and calls EndDrag/Refresh internally on success.
     private bool TryEquipViaDropAtCursor()
     {
         if (equipmentController == null || _pickedDef == null) return false;
@@ -362,6 +389,100 @@ public class InventoryDragController : MonoBehaviour
         return false;
     }
 
+    // -------- World drop helpers --------
+    private int GetPickedStackCount()
+    {
+        // Equipment items don't have stacks; treat as 1.
+        if (_equipSourceSlot.HasValue) return 1;
+        if (_pickedItem == null) return 1;
+
+        var type = _pickedItem.GetType();
+
+        // Try common field names first
+        var field =
+            type.GetField("stack", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance) ??
+            type.GetField("Stack", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance) ??
+            type.GetField("stackCount", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance) ??
+            type.GetField("StackCount", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+        if (field != null && field.FieldType == typeof(int))
+        {
+            return (int)field.GetValue(_pickedItem);
+        }
+
+        // Then try properties
+        var prop =
+            type.GetProperty("stack") ??
+            type.GetProperty("Stack") ??
+            type.GetProperty("stackCount") ??
+            type.GetProperty("StackCount");
+
+        if (prop != null && prop.PropertyType == typeof(int))
+        {
+            return (int)prop.GetValue(_pickedItem);
+        }
+
+        // Fallback – single item
+        return 1;
+    }
+
+    // -------- World drop helpers --------
+    private void TryDropToWorld()
+    {
+        if (itemDropManager == null)
+        {
+            Debug.LogWarning("[Drag] TryDropToWorld: no ItemDropManager wired.");
+            return;
+        }
+
+        if (_pickedDef == null)
+            return;
+
+        // If pointer is still over some UI, don't drop to world.
+        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            return;
+
+        Vector2 mouse = MousePos();
+        int stackCount = GetPickedStackCount();
+
+        bool dropped = itemDropManager.TryDropItemFromScreenPos(_pickedDef, stackCount, mouse);
+        Debug.Log($"[Drag] TryDropToWorld => {dropped}, stack={stackCount}");
+
+        // If we failed to find ground / free spot, restore the item to its cell
+        if (!dropped)
+        {
+            CancelDrag();    // puts it back to _origX/_origY and ends drag
+            return;
+        }
+
+        // ✅ Drop succeeded → now update gameplay state
+
+        if (_equipSourceSlot.HasValue)
+        {
+            // Dragging from equipment: actually unequip the item
+            if (equipmentController != null)
+            {
+                equipmentController.TryUnequip(_equipSourceSlot.Value);
+                equipmentController.RefreshUI();
+            }
+
+            // Prevent EndDrag() from restoring the old preview
+            _equipSourceSlot = null;
+        }
+        else
+        {
+            // Dragging from inventory grid: remove this instance from the inventory
+            if (inventory != null && _pickedItem != null)
+            {
+                // This should fire OnInventoryChanged so PotionHotbar & others update
+                inventory.Remove(_pickedItem);
+            }
+        }
+
+        inventoryUI.ClearHighlights();
+        EndDrag(commit: true);
+        inventoryUI.Refresh();
+    }
 
     // -------- Helpers --------
     private RectTransform CreateGhost(Texture tex, Vector2 size)
@@ -379,6 +500,7 @@ public class InventoryDragController : MonoBehaviour
         _ghostRaw.color = new Color(1f, 1f, 1f, 0.9f);
         return rt;
     }
+
     private RectTransform CreateFootprint()
     {
         var go = new GameObject("FootprintPreview", typeof(RectTransform), typeof(CanvasRenderer), typeof(Image));
@@ -447,7 +569,7 @@ public class InventoryDragController : MonoBehaviour
         float top = rect.height * (1f - pivot.y);
 
         Vector2 tl = new Vector2(left, top);     // grid rect top-left in local space
-        Vector2 fromTL = localInGrid - tl;           // vector from grid rect top-left
+        Vector2 fromTL = localInGrid - tl;       // vector from grid rect top-left
 
         var cs = _grid.cellSize;
         var sp = _grid.spacing;
@@ -550,7 +672,6 @@ public class InventoryDragController : MonoBehaviour
         IsDragging = true;
     }
 
-
     // --- Input System helpers ---
     private static Vector2 MousePos() =>
         Mouse.current != null ? (Vector2)Mouse.current.position.ReadValue() : Vector2.zero;
@@ -566,5 +687,4 @@ public class InventoryDragController : MonoBehaviour
 
     // Forward access to the EquipmentController
     public EquipmentSlotUI GetSlotUI(EquipmentSlot slot) => equipmentController?.GetSlotUI(slot);
-
 }

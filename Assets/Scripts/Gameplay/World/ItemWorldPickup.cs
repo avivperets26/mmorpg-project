@@ -1,7 +1,7 @@
 // Assets/Scripts/Items/ItemWorldPickup.cs
 using UnityEngine;
 using TMPro;
-using Game.Items; // <-- add this
+using Game.Items;
 
 [RequireComponent(typeof(Collider))]
 public class ItemWorldPickup : MonoBehaviour, IInteractable
@@ -13,7 +13,8 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
     [Min(0.1f)] public float pickupRadius = 2.0f;
 
     [Header("UI (optional)")]
-    public TextMeshPro label;   // assign if you want the floating label
+    // ✅ Use TMP_Text so you can assign TextMeshProUGUI
+    public TMP_Text label;
 
     public Transform Transform => transform;
     public float MaxUseDistance => pickupRadius;
@@ -77,6 +78,28 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
         }
     }
 
+    /// <summary>
+    /// Called by WorldItem when a pickup is spawned from the inventory.
+    /// Updates the definition + label text/color so tier colors are preserved.
+    /// </summary>
+    public void SetRuntimeDefinition(ItemDefinition definition, int stackCount)
+    {
+        if (definition == null) return;
+
+        def = definition;
+
+        if (label != null)
+        {
+            label.text = def.displayName;
+            // Use your tier color helper (same as in Awake)
+            label.color = RarityRules.GetLabelColor(def.defaultTier);
+            // or, if you prefer legacy:
+            // label.color = ItemDefinition.RarityColor(def.legacyRarity);
+        }
+
+        // If you ever track stack count on the pickup itself, update it here too.
+        // (Right now you don't, so we just ignore stackCount.)
+    }
 
 #if UNITY_EDITOR
     void OnDrawGizmosSelected()
