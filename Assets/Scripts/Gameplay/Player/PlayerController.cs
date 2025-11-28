@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using System.Collections;
 using UnityEngine.EventSystems;
+using Game.Enemies;
 
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
@@ -155,7 +156,7 @@ public class PlayerController : MonoBehaviour
             {
                 // 1) Did we click something damageable?
                 IDamageable dmg = hit.collider.GetComponentInParent<IDamageable>();
-                if (dmg != null)
+                if (dmg != null && !IsTargetDead(dmg))
                 {
                     if (attackInputLockTimer > 0f && currentAttackTarget == dmg)
                         return; // ignore spam on same target while swing is locked
@@ -222,88 +223,90 @@ public class PlayerController : MonoBehaviour
         // ===== CLICK-TO-MOVE (with optional auto-attack on arrival) =====
         if (hasClickTarget)
         {
-            bool sprintAppliedThisFrame = false;
-            Vector3 toTarget = clickTargetWorld - transform.position;
-            toTarget.y = 0f;
-            float dist = toTarget.magnitude;
-
-            // Are we chasing something we want to auto-attack?
-            bool hasPendingAttack = autoAttackOnArrival && pendingAttackTarget != null;
-
-            // If we have a pending attack and we're close enough, stop and attack.
-            if (hasPendingAttack && dist <= attackRange * 0.9f)
+            if (autoAttackOnArrival && pendingAttackTarget != null && IsTargetDead(pendingAttackTarget))
             {
                 hasClickTarget = false;
-
-                // Face the target *instantly* so we never swing in the wrong direction
-                Vector3 faceDir = pendingAttackTarget is Component c
-                    ? (c.transform.position - transform.position)
-                    : toTarget;
-                faceDir.y = 0f;
-
-                if (faceDir.sqrMagnitude > 0.0001f)
-                    transform.rotation = Quaternion.LookRotation(faceDir.normalized);
-
-                lastAttackFaceDir = faceDir.normalized;
-                currentAttackTarget = pendingAttackTarget;
-
-                // Start looping auto attacks (first swing fires immediately)
-                StartAutoAttackLoop();
-
                 autoAttackOnArrival = false;
                 pendingAttackTarget = null;
-
-                // No movement this frame
                 motion = Vector3.zero;
-            }
-            else if (dist <= stopDistance)
-            {
-                // Normal arrival with no pending attack
-                hasClickTarget = false;
-                motion = Vector3.zero; // make sure we don't move past the target
             }
             else
             {
-                float effectiveMoveSpeed = moveSpeed;
+                bool sprintAppliedThisFrame = false;
+                Vector3 toTarget = clickTargetWorld - transform.position;
+                toTarget.y = 0f;
+                float dist = toTarget.magnitude;
 
-                // 🔹 Sprint: hold Left Ctrl while moving
-                if (sprintHeld && stats != null)
+                bool hasPendingAttack = autoAttackOnArrival && pendingAttackTarget != null && !IsTargetDead(pendingAttackTarget);
+
+                if (hasPendingAttack && dist <= attackRange * 0.9f)
                 {
-                    float sprintCost = sprintStaminaPerSecond * Time.deltaTime;
+                    hasClickTarget = false;
 
-                    if (stats.TryConsumeStamina(sprintCost))
+                    Vector3 faceDir = pendingAttackTarget is Component c
+                        ? (c.transform.position - transform.position)
+                        : toTarget;
+                    faceDir.y = 0f;
+
+                    if (faceDir.sqrMagnitude > 0.0001f)
+                        transform.rotation = Quaternion.LookRotation(faceDir.normalized);
+
+                    lastAttackFaceDir = faceDir.normalized;
+                    currentAttackTarget = pendingAttackTarget;
+
+                    StartAutoAttackLoop();
+
+                    autoAttackOnArrival = false;
+                    pendingAttackTarget = null;
+
+                    motion = Vector3.zero;
+                }
+                else if (dist <= stopDistance || IsTargetDead(pendingAttackTarget))
+                {
+                    hasClickTarget = false;
+                    motion = Vector3.zero;
+                    autoAttackOnArrival = false;
+                    pendingAttackTarget = null;
+                }
+                else
+                {
+                    float effectiveMoveSpeed = moveSpeed;
+
+                    if (sprintHeld && stats != null)
                     {
-                        effectiveMoveSpeed *= sprintSpeedMultiplier;
-                        sprintAppliedThisFrame = true;
+                        float sprintCost = sprintStaminaPerSecond * Time.deltaTime;
+
+                        if (stats.TryConsumeStamina(sprintCost))
+                        {
+                            effectiveMoveSpeed *= sprintSpeedMultiplier;
+                            sprintAppliedThisFrame = true;
+                        }
+                        else
+                        {
+                            sprintHeld = false;
+                            Debug.Log("Sprint stopped (stamina exhausted)");
+                        }
                     }
-                    else
-                    {
-                        sprintHeld = false;
-                        Debug.Log("Sprint stopped (stamina exhausted)");
-                    }
+
+                    desiredDir = toTarget / Mathf.Max(dist, 0.0001f);
+                    float maxStep = effectiveMoveSpeed * Time.deltaTime;
+                    float targetStep = Mathf.Max(0f, dist - stopDistance);
+                    float step = Mathf.Min(maxStep, targetStep);
+                    motion = desiredDir * (step / Mathf.Max(Time.deltaTime, 0.0001f));
                 }
 
-                // Direction towards target on XZ
-                desiredDir = toTarget / Mathf.Max(dist, 0.0001f);
+                if (sprintAppliedThisFrame && !sprintApplying)
+                {
+                    Debug.Log($"Sprint applied (x{sprintSpeedMultiplier:0.00}, stamina now {stats?.CurrentStamina.ToString("F1") ?? "n/a"})");
+                }
+                else if (!sprintAppliedThisFrame && sprintApplying && sprintHeld)
+                {
+                    float planarSpeed = new Vector2(motion.x, motion.z).magnitude;
+                    Debug.Log($"Sprint input held but boost not applied (hasClickTarget={hasClickTarget}, planarSpeed={planarSpeed:0.00})");
+                }
 
-                // --- Arrival braking ---
-                float maxStep = effectiveMoveSpeed * Time.deltaTime;
-                float targetStep = Mathf.Max(0f, dist - stopDistance);
-                float step = Mathf.Min(maxStep, targetStep);
-                motion = desiredDir * (step / Mathf.Max(Time.deltaTime, 0.0001f));
+                sprintApplying = sprintAppliedThisFrame;
             }
-
-            if (sprintAppliedThisFrame && !sprintApplying)
-            {
-                Debug.Log($"Sprint applied (x{sprintSpeedMultiplier:0.00}, stamina now {stats?.CurrentStamina.ToString("F1") ?? "n/a"})");
-            }
-            else if (!sprintAppliedThisFrame && sprintApplying && sprintHeld)
-            {
-                float planarSpeed = new Vector2(motion.x, motion.z).magnitude;
-                Debug.Log($"Sprint input held but boost not applied (hasClickTarget={hasClickTarget}, planarSpeed={planarSpeed:0.00})");
-            }
-
-            sprintApplying = sprintAppliedThisFrame;
         }
         else
         {
@@ -374,6 +377,12 @@ public class PlayerController : MonoBehaviour
     // Auto attack trigger (animation + delayed hit)
     private void TriggerAutoAttack()
     {
+        if (IsTargetDead(currentAttackTarget))
+        {
+            StopAutoAttackLoop();
+            return;
+        }
+
         // Enter combat pose
         isInCombat = true;
         combatTimer = combatFadeTime;
@@ -492,6 +501,11 @@ public class PlayerController : MonoBehaviour
     private void DoAutoAttackHit()
     {
         if (!enabled) return;
+        if (IsTargetDead(currentAttackTarget))
+        {
+            StopAutoAttackLoop();
+            return;
+        }
 
         // --- Decide damage ---
         int dmg = fallbackAttackDamage;
@@ -560,9 +574,13 @@ public class PlayerController : MonoBehaviour
         if (Physics.Raycast(ray, out RaycastHit hit, faceMouseMaxDistance, ~0,
                 QueryTriggerInteraction.Ignore))
         {
-            dmg = hit.collider.GetComponentInParent<IDamageable>();
-            hitPoint = hit.point;
-            return dmg != null;
+            var maybeDmg = hit.collider.GetComponentInParent<IDamageable>();
+            if (maybeDmg != null && !IsTargetDead(maybeDmg))
+            {
+                dmg = maybeDmg;
+                hitPoint = hit.point;
+                return true;
+            }
         }
 
         return false;
@@ -660,6 +678,9 @@ public class PlayerController : MonoBehaviour
     {
         if (!(currentAttackTarget is Component c)) return false;
 
+        if (IsTargetDead(currentAttackTarget))
+            return false;
+
         // Destroyed or disabled
         if (c == null || !c.gameObject.activeInHierarchy) return false;
 
@@ -668,6 +689,14 @@ public class PlayerController : MonoBehaviour
         toTarget.y = 0f;
         float dist = toTarget.magnitude;
         return dist <= attackRange * 1.1f; // small slack
+    }
+
+    private bool IsTargetDead(IDamageable dmg)
+    {
+        if (dmg is EnemyHealth eh)
+            return eh.IsDead;
+
+        return false;
     }
 
     private IEnumerator AutoAttackLoop()

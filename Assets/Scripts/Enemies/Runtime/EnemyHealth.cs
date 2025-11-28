@@ -20,7 +20,7 @@ namespace Game.Enemies
     ///   - EnemyXpOnDeath
     /// </summary>
     [DisallowMultipleComponent]
-    public class EnemyHealth : MonoBehaviour
+    public class EnemyHealth : MonoBehaviour, IDamageable
     {
         [Header("Sources")]
         [Tooltip("Optional. If assigned, MaxHealth will come from EnemyStats.")]
@@ -42,6 +42,10 @@ namespace Game.Enemies
         /// <summary>True after Die() has been called.</summary>
         public bool IsDead { get; private set; }
 
+        // Cache colliders so we can disable clicks/highlights on death.
+        private Collider[] _colliders;
+        private int _originalLayer;
+
         // Events --------------------------------------------------------------
         public event Action<EnemyHealth, float> OnDamaged;
         public event Action<EnemyHealth, float> OnHealed;
@@ -49,6 +53,9 @@ namespace Game.Enemies
 
         private void Awake()
         {
+            _colliders = GetComponentsInChildren<Collider>(true);
+            _originalLayer = gameObject.layer;
+
             RecalculateMaxHealth();
             ResetHealth();
         }
@@ -87,6 +94,9 @@ namespace Game.Enemies
             RecalculateMaxHealth();
             CurrentHealth = MaxHealth;
             IsDead = false;
+
+            SetCollidersEnabled(true);
+            RestoreLayer();
         }
 
         /// <summary>
@@ -155,6 +165,15 @@ namespace Game.Enemies
         }
 
         /// <summary>
+        /// Implements IDamageable so player auto-attacks can target enemies via clicks/raycast.
+        /// </summary>
+        public void TakeHit(int amount, Vector3 hitPoint, Vector3 hitNormal)
+        {
+            if (IsDead) return;
+            TakeDamage(amount);
+        }
+
+        /// <summary>
         /// Kill instantly (sets HP to 0 and fires OnDeath).
         /// </summary>
         public void Kill()
@@ -184,6 +203,9 @@ namespace Game.Enemies
             }
 
             OnDeath?.Invoke(this);
+
+            SetCollidersEnabled(false); // prevent further raycast clicks/highlights
+            SetIgnoreRaycastLayer();
         }
 
         /// <summary>
@@ -192,6 +214,29 @@ namespace Game.Enemies
         public float GetHealthNormalized()
         {
             return MaxHealth > 0f ? CurrentHealth / MaxHealth : 0f;
+        }
+
+        private void SetCollidersEnabled(bool enabled)
+        {
+            if (_colliders == null) return;
+            foreach (var col in _colliders)
+            {
+                if (col) col.enabled = enabled;
+            }
+        }
+
+        private void SetIgnoreRaycastLayer()
+        {
+            int ignoreLayer = LayerMask.NameToLayer("Ignore Raycast");
+            if (ignoreLayer >= 0)
+            {
+                gameObject.layer = ignoreLayer;
+            }
+        }
+
+        private void RestoreLayer()
+        {
+            gameObject.layer = _originalLayer;
         }
     }
 }
