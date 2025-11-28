@@ -3,10 +3,18 @@ using UnityEngine;
 using TMPro;
 
 /// <summary>
-/// World-space damage number:
+/// World-space floating text:
 /// - moves up
 /// - faces the camera
 /// - fades out
+///
+/// NOTE:
+/// - SetValue(int) is kept for backward compatibility (dummy, etc.).
+/// - New helpers:
+///     SetEnemyDamage(int)
+///     SetPlayerDamage(int)
+///     SetMiss()
+///     SetXp(int)
 /// </summary>
 public class DamagePopup : MonoBehaviour
 {
@@ -19,6 +27,19 @@ public class DamagePopup : MonoBehaviour
     [SerializeField] private float fadeOutDuration = 0.4f;
     [SerializeField] private float randomHorizontalOffset = 0.2f;
 
+    [Header("Colors")]
+    [Tooltip("Default color for damage done to enemies (player attacks).")]
+    [SerializeField] private Color enemyDamageColor = Color.white;
+
+    [Tooltip("Color for damage taken by the player (enemy attacks).")]
+    [SerializeField] private Color playerDamageColor = new Color(1f, 0.25f, 0.25f); // red
+
+    [Tooltip("Color for 'Miss' popups.")]
+    [SerializeField] private Color missColor = new Color(0.7f, 0.7f, 0.7f);        // grey
+
+    [Tooltip("Color for '+XP' popups.")]
+    [SerializeField] private Color xpColor = new Color(0.95f, 0.87f, 0.3f);        // golden-ish
+
     private float _timeAlive;
     private Color _baseColor;
     private Transform _cam;
@@ -29,22 +50,67 @@ public class DamagePopup : MonoBehaviour
             text = GetComponentInChildren<TextMeshPro>();
 
         if (text)
+        {
             _baseColor = text.color;
+
+            // If enemyDamageColor is not set in Inspector, default to current text color.
+            if (enemyDamageColor.a <= 0f)
+                enemyDamageColor = text.color;
+        }
 
         // Camera might not exist yet in Awake, so we'll also check in Update.
         if (Camera.main)
             _cam = Camera.main.transform;
     }
 
+    // --------------------------------------------------------------------
+    // Public API
+    // --------------------------------------------------------------------
+
+    /// <summary>
+    /// Backwards compatible: used by DummyTarget etc.
+    /// Interpreted as "damage dealt to enemy".
+    /// </summary>
     public void SetValue(int damage)
+    {
+        SetEnemyDamage(damage);
+    }
+
+    /// <summary>Damage dealt to an enemy (player hitting dummy / mob).</summary>
+    public void SetEnemyDamage(int damage)
+    {
+        Setup(damage.ToString(), enemyDamageColor);
+    }
+
+    /// <summary>Damage taken by the player (enemy hits player).</summary>
+    public void SetPlayerDamage(int damage)
+    {
+        Setup(damage.ToString(), playerDamageColor);
+    }
+
+    /// <summary>Enemy attack missed the player.</summary>
+    public void SetMiss()
+    {
+        Setup("Miss", missColor);
+    }
+
+    /// <summary>XP gained from killing an enemy.</summary>
+    public void SetXp(int xpAmount)
+    {
+        Setup($"+{xpAmount} XP", xpColor);
+    }
+
+    // Common internal setup
+    private void Setup(string value, Color color)
     {
         if (!text) return;
 
-        text.text = damage.ToString();
+        text.text = value;
+        text.color = color;
         _baseColor = text.color;
         _timeAlive = 0f;
 
-        // Slight random offset so multiple hits don't overlap perfectly
+        // Slight random offset so multiple popups don't overlap perfectly
         Vector3 pos = transform.position;
         pos.x += Random.Range(-randomHorizontalOffset, randomHorizontalOffset);
         pos.z += Random.Range(-randomHorizontalOffset, randomHorizontalOffset);
