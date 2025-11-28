@@ -4,11 +4,8 @@ using Game.Enemies;
 /// <summary>
 /// Handles basic enemy combat:
 /// - Keeps attack range & cooldown
-/// - On TryAttack, checks distance + facing + hit chance
-/// - Deals damage to the player and spawns damage / miss popups
-///
-/// NOTE: Still "instant hit" for now. Later we can sync this with an
-/// animation event or windup state.
+/// - TryAttack starts the attack animation
+/// - Actual hit/miss, damage & popups happen from an Animation Event
 /// </summary>
 [DisallowMultipleComponent]
 public class EnemyCombatController : MonoBehaviour
@@ -16,8 +13,9 @@ public class EnemyCombatController : MonoBehaviour
     [Header("Wiring")]
     public EnemyStats stats;
     public EnemyHealth health;
-    public PlayerStats playerStats;         // target player to damage
-    public DamagePopup damagePopupPrefab;   // same prefab we use everywhere
+    public PlayerStats playerStats;
+    public DamagePopup damagePopupPrefab;
+    public Animator animator;
 
     [Header("Attack Settings")]
     [Tooltip("Max distance to the player at which we even consider attacking.")]
@@ -49,18 +47,23 @@ public class EnemyCombatController : MonoBehaviour
 
     private float _cooldown;
 
+    // Remember who we started this attack against, so the animation event can use it
+    private Transform _lastTarget;
+
     public float AttackRange => attackRange;
 
     private void Reset()
     {
         if (!stats) stats = GetComponent<EnemyStats>();
         if (!health) health = GetComponent<EnemyHealth>();
+        if (!animator) animator = GetComponentInChildren<Animator>();
     }
 
     private void Awake()
     {
         if (!stats) stats = GetComponent<EnemyStats>();
         if (!health) health = GetComponent<EnemyHealth>();
+        if (!animator) animator = GetComponentInChildren<Animator>();
 
         // If not set explicitly, default from EnemyStats (baseAttackSpeed)
         if (stats != null && attackInterval <= 0f)
@@ -80,8 +83,8 @@ public class EnemyCombatController : MonoBehaviour
 
     /// <summary>
     /// Called by EnemyAIController when in Attacking state.
-    /// Returns true if an attack was actually performed
-    /// (hit OR miss) and cooldown was consumed.
+    /// Returns true if an attack animation was started and cooldown consumed.
+    /// Damage is applied later via animation event.
     /// </summary>
     public bool TryAttack(Transform targetTransform)
     {
@@ -100,6 +103,42 @@ public class EnemyCombatController : MonoBehaviour
         // Consume cooldown - attack attempt happens now.
         _cooldown = attackInterval;
 
+        // Remember target for the animation event
+        _lastTarget = targetTransform;
+
+        // Start the attack animation (hit will happen partway through the clip)
+        if (animator)
+        {
+            animator.ResetTrigger("Attack");
+            animator.SetTrigger("Attack");
+        }
+
+        // IMPORTANT: no damage or popup here
+        return true;
+    }
+
+    /// <summary>
+    /// Called from the attack animation via Animation Event at the impact frame.
+    /// Performs hit/miss logic, damage, and popups.
+    /// </summary>
+    public void AnimationEvent_AttackHit()
+    {
+        if (!enabled) return;
+        if (health == null || health.IsDead) return;
+
+        // Choose target: the one we stored, or fallback to wired PlayerStats
+        Transform targetTransform = _lastTarget;
+        if (!targetTransform && playerStats)
+            targetTransform = playerStats.transform;
+        if (!targetTransform) return;
+
+        // Re-check distance at the moment of impact (player might have moved)
+        Vector3 toTarget = targetTransform.position - transform.position;
+        toTarget.y = 0f;
+        float dist = toTarget.magnitude;
+        if (dist > attackRange)
+            return;
+
         // --- Facing check (is player roughly in front?) ---
         Vector3 forward = transform.forward;
         forward.y = 0f;
@@ -110,16 +149,14 @@ public class EnemyCombatController : MonoBehaviour
         float dot = Vector3.Dot(forward.normalized, dirToTarget);
         bool isInFront = dot >= minFrontDot;
 
-        // --- Hit chance (very simple for now) ---
+        // --- Hit chance ---
         bool didHitRoll = Random.value <= baseHitChance;
-
-        // --- Decide miss / hit BEFORE applying damage ---
         bool isHit = isInFront && didHitRoll;
 
         // Popup position (above player)
         Vector3 popupPos = targetTransform.position + Vector3.up * 1.7f;
 
-        // If MISS -> show miss popup and exit.
+        // MISS branch
         if (!isHit)
         {
             if (damagePopupPrefab)
@@ -127,9 +164,7 @@ public class EnemyCombatController : MonoBehaviour
                 DamagePopup missPopup = Object.Instantiate(damagePopupPrefab, popupPos, Quaternion.identity);
                 missPopup.SetMiss();
             }
-
-            // Later we can add block/parry effects here.
-            return true;
+            return;
         }
 
         // --- HIT branch ---
@@ -150,18 +185,15 @@ public class EnemyCombatController : MonoBehaviour
         if (!ps)
             ps = targetTransform.GetComponentInParent<PlayerStats>();
 
-        if (ps)
+        if (!ps) return;
+
+        ps.TakeDamage(damage);
+
+        if (damagePopupPrefab)
         {
-            ps.TakeDamage(damage);
-
-            if (damagePopupPrefab)
-            {
-                DamagePopup dmgPopup = Object.Instantiate(damagePopupPrefab, popupPos, Quaternion.identity);
-                dmgPopup.SetPlayerDamage(damage); // red numbers
-            }
+            DamagePopup dmgPopup = Object.Instantiate(damagePopupPrefab, popupPos, Quaternion.identity);
+            dmgPopup.SetPlayerDamage(damage); // red numbers
         }
-
-        return true;
     }
 
 #if UNITY_EDITOR

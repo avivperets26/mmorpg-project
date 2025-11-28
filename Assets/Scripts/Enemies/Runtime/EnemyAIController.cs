@@ -38,11 +38,15 @@ namespace Game.Enemies
         public EnemyHealth health;
         public EnemyCombatController combat;
 
+        [Tooltip("Animator controlling the enemy visuals.")]
+        public Animator animator;
+
         [Tooltip("Optional: used for facing. If null, this.transform is used.")]
         public Transform modelRoot;
 
         [Tooltip("Player to focus. If null, will attempt to FindObjectOfType<PlayerStats>() at runtime.")]
         public PlayerStats targetPlayer;
+
 
         [Header("Behavior (Aggressive)")]
         [Tooltip("Radius around this enemy where it will aggro onto the player.")]
@@ -66,6 +70,8 @@ namespace Game.Enemies
             if (!health) health = GetComponent<EnemyHealth>();
             if (!combat) combat = GetComponent<EnemyCombatController>();
             if (!modelRoot) modelRoot = transform;
+            if (!animator) animator = GetComponentInChildren<Animator>();
+
         }
 
         private void Awake()
@@ -74,6 +80,7 @@ namespace Game.Enemies
             if (!health) health = GetComponent<EnemyHealth>();
             if (!combat) combat = GetComponent<EnemyCombatController>();
             if (!modelRoot) modelRoot = transform;
+            if (!animator) animator = GetComponentInChildren<Animator>();
 
             if (!targetPlayer)
                 targetPlayer = FindObjectOfType<PlayerStats>();
@@ -90,6 +97,8 @@ namespace Game.Enemies
         {
             if (health != null)
                 health.OnDeath += OnDeath;
+
+            ResetAnimatorToIdle();
         }
 
         private void OnDisable()
@@ -123,10 +132,16 @@ namespace Game.Enemies
                     break;
             }
         }
-
         private void TickIdle()
         {
-            if (!HasValidTarget()) return;
+            // Always force idle speed when idle
+            if (animator) animator.SetFloat("MoveSpeed", 0f);
+
+            if (!HasValidTarget())
+            {
+                _state = State.Idle;
+                return;
+            }
 
             float dist = GetTargetDistance();
             if (dist <= aggroRadius)
@@ -135,11 +150,13 @@ namespace Game.Enemies
             }
         }
 
+
         private void TickChasing()
         {
             if (!HasValidTarget())
             {
                 _state = State.Idle;
+                if (animator) animator.SetFloat("MoveSpeed", 0f);
                 return;
             }
 
@@ -147,8 +164,8 @@ namespace Game.Enemies
 
             if (dist > loseAggroRadius)
             {
-                // Player ran far away; drop aggro for now.
                 _state = State.Idle;
+                if (animator) animator.SetFloat("MoveSpeed", 0f);
                 return;
             }
 
@@ -157,6 +174,7 @@ namespace Game.Enemies
             if (dist <= attackRange)
             {
                 _state = State.Attacking;
+                if (animator) animator.SetFloat("MoveSpeed", 0f);
                 return;
             }
 
@@ -172,6 +190,14 @@ namespace Game.Enemies
                     step = dir.normalized * planarDist;
 
                 transform.position += step;
+
+                // <- THIS is what should push us into Walking
+                if (animator) animator.SetFloat("MoveSpeed", _moveSpeed);
+            }
+            else
+            {
+                // Close enough, no movement
+                if (animator) animator.SetFloat("MoveSpeed", 0f);
             }
 
             FaceTarget();
@@ -182,6 +208,7 @@ namespace Game.Enemies
             if (!HasValidTarget())
             {
                 _state = State.Idle;
+                if (animator) animator.SetFloat("MoveSpeed", 0f);
                 return;
             }
 
@@ -194,9 +221,11 @@ namespace Game.Enemies
                 return;
             }
 
+            // Standing still while attacking
+            if (animator) animator.SetFloat("MoveSpeed", 0f);
+
             FaceTarget();
 
-            // Fire attacks via combat controller
             if (combat != null)
             {
                 combat.TryAttack(_targetTransform);
@@ -206,7 +235,13 @@ namespace Game.Enemies
         private void OnDeath(EnemyHealth _)
         {
             _state = State.Dead;
+            if (animator)
+            {
+                animator.SetBool("IsDead", true);
+                animator.SetFloat("MoveSpeed", 0f);
+            }
         }
+
 
         private bool HasValidTarget()
         {
@@ -238,6 +273,17 @@ namespace Game.Enemies
                 Quaternion targetRot = Quaternion.LookRotation(dir.normalized, Vector3.up);
                 modelRoot.rotation = Quaternion.Lerp(modelRoot.rotation, targetRot, Time.deltaTime * 10f);
             }
+        }
+
+        private void ResetAnimatorToIdle()
+        {
+            if (!animator) return;
+
+            // Clear any stale states/params so we always start from Idle visually.
+            animator.ResetTrigger("Attack");
+            animator.SetBool("IsDead", false);
+            animator.SetFloat("MoveSpeed", 0f);
+            animator.Play("Idle", 0, 0f);
         }
 
 #if UNITY_EDITOR
