@@ -59,6 +59,17 @@ namespace Game.Enemies
         [Tooltip("How close we allow getting to the player while chasing.")]
         public float stopDistanceBuffer = 0.1f;
 
+        [Header("Idle Wander")]
+        [Tooltip("Radius around the spawn point to wander while idle (0 = no wandering).")]
+        public float wanderRadius = 3f;
+
+        [Tooltip("Random seconds between idle wander picks (x=min, y=max).")]
+        public Vector2 wanderInterval = new Vector2(2f, 5f);
+
+        [Tooltip("Fraction of move speed to use while wandering.")]
+        [Range(0.1f, 1f)]
+        public float wanderMoveSpeedMultiplier = 0.6f;
+
         [Header("Crowd Awareness")]
         [Tooltip("Radius within which other living enemies will push this one sideways to keep spacing.")]
         public float separationRadius = 1.25f;
@@ -75,6 +86,10 @@ namespace Game.Enemies
         private Transform _targetTransform;
         private float _moveSpeed = 2.0f;
         private static readonly List<EnemyAIController> ActiveEnemies = new List<EnemyAIController>();
+        private Vector3 _spawnPosition;
+        private Vector3 _wanderTarget;
+        private bool _hasWanderTarget;
+        private float _wanderCooldown;
 
         private void Reset()
         {
@@ -103,6 +118,9 @@ namespace Game.Enemies
             _moveSpeed = stats != null && stats.MoveSpeed > 0f
                 ? stats.MoveSpeed
                 : 2.0f;
+
+            _spawnPosition = transform.position;
+            _wanderCooldown = Random.Range(wanderInterval.x, wanderInterval.y);
         }
 
         private void OnEnable()
@@ -165,6 +183,8 @@ namespace Game.Enemies
             {
                 _state = State.Chasing;
             }
+
+            UpdateIdleWander();
         }
 
 
@@ -381,6 +401,69 @@ namespace Game.Enemies
             }
 
             return separation;
+        }
+
+        /// <summary>
+        /// Gentle wandering while idle to avoid statuesque mobs.
+        /// Picks a random point near the spawn position, walks there, then rests.
+        /// </summary>
+        private void UpdateIdleWander()
+        {
+            if (wanderRadius <= 0f)
+                return;
+
+            if (_hasWanderTarget == false)
+            {
+                _wanderCooldown -= Time.deltaTime;
+                if (_wanderCooldown <= 0f)
+                {
+                    PickNewWanderTarget();
+                }
+                else
+                {
+                    if (animator) animator.SetFloat("MoveSpeed", 0f);
+                }
+                return;
+            }
+
+            Vector3 toTarget = _wanderTarget - transform.position;
+            toTarget.y = 0f;
+            float dist = toTarget.magnitude;
+
+            if (dist <= stopDistanceBuffer * 0.8f)
+            {
+                _hasWanderTarget = false;
+                _wanderCooldown = Random.Range(wanderInterval.x, wanderInterval.y);
+                if (animator) animator.SetFloat("MoveSpeed", 0f);
+                return;
+            }
+
+            Vector3 dir = toTarget.normalized;
+            float wanderSpeed = _moveSpeed * Mathf.Clamp01(wanderMoveSpeedMultiplier);
+            Vector3 step = dir * (wanderSpeed * Time.deltaTime);
+            if (step.magnitude > dist)
+                step = dir * dist;
+
+            transform.position += step;
+
+            if (dir.sqrMagnitude > 0.0001f)
+            {
+                Quaternion targetRot = Quaternion.LookRotation(dir, Vector3.up);
+                modelRoot.rotation = Quaternion.Lerp(modelRoot.rotation, targetRot, Time.deltaTime * 5f);
+            }
+
+            if (animator) animator.SetFloat("MoveSpeed", wanderSpeed);
+        }
+
+        private void PickNewWanderTarget()
+        {
+            // Protect against invalid interval config
+            if (wanderInterval.y < wanderInterval.x)
+                wanderInterval.y = wanderInterval.x + 0.1f;
+
+            Vector2 offset2D = Random.insideUnitCircle * wanderRadius;
+            _wanderTarget = _spawnPosition + new Vector3(offset2D.x, 0f, offset2D.y);
+            _hasWanderTarget = true;
         }
     }
 }

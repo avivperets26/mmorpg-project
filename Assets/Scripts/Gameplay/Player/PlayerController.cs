@@ -105,6 +105,9 @@ public class PlayerController : MonoBehaviour
     private bool pendingMoveClick;
     private InputAction.CallbackContext pendingClickCtx; // (currently unused, but kept)
 
+    // Hover selection
+    private EnemyTargetInteractable hoveredEnemy;
+
     // --- Combat / animation (visual) ---
     private bool isInCombat;
 
@@ -138,6 +141,8 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
+        UpdateHoverTarget();
+
         // --- Handle deferred click-to-move / click-to-attack after UI has updated ---
         if (pendingMoveClick)
         {
@@ -158,6 +163,13 @@ public class PlayerController : MonoBehaviour
                 IDamageable dmg = hit.collider.GetComponentInParent<IDamageable>();
                 if (dmg != null && !IsTargetDead(dmg))
                 {
+                    // NEW: if it’s an enemy, fire the selection event
+                    var enemyInteractable = hit.collider.GetComponentInParent<EnemyTargetInteractable>();
+                    if (enemyInteractable != null)
+                    {
+                        enemyInteractable.Interact(gameObject); // shows TargetInfoUI
+                    }
+
                     if (attackInputLockTimer > 0f && currentAttackTarget == dmg)
                         return; // ignore spam on same target while swing is locked
 
@@ -181,6 +193,9 @@ public class PlayerController : MonoBehaviour
                     autoAttackOnArrival = false;
                     pendingAttackTarget = null;
 
+                    // NEW: clear current enemy selection when we click ground
+                    EnemyTargetInteractable.ClearSelection();
+
                     // Ground click stops any running attack loop AND cancels attack anim.
                     CancelCurrentAttack(resetCombatPose: false);
                 }
@@ -188,6 +203,7 @@ public class PlayerController : MonoBehaviour
             else
             {
                 // Missed everything; treat as cancel.
+                EnemyTargetInteractable.ClearSelection();   // NEW: also clear here
                 CancelCurrentAttack(resetCombatPose: false);
             }
         }
@@ -373,6 +389,53 @@ public class PlayerController : MonoBehaviour
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+
+    private void UpdateHoverTarget()
+    {
+        // Do not hover when UI is blocking input
+        if (IsPointerOverUI())
+        {
+            if (hoveredEnemy != null)
+            {
+                hoveredEnemy = null;
+                EnemyTargetInteractable.SetHover(null);
+            }
+            return;
+        }
+
+        var cam = Camera.main;
+        if (!cam)
+        {
+            if (hoveredEnemy != null)
+            {
+                hoveredEnemy = null;
+                EnemyTargetInteractable.SetHover(null);
+            }
+            return;
+        }
+
+        Ray ray = cam.ScreenPointToRay(mouseScreenPos);
+        EnemyTargetInteractable nextHover = null;
+
+        if (Physics.Raycast(ray, out RaycastHit hit, faceMouseMaxDistance, ~0, QueryTriggerInteraction.Ignore))
+        {
+            var candidate = hit.collider.GetComponentInParent<EnemyTargetInteractable>();
+            if (candidate != null)
+            {
+                // Skip dead enemies
+                if (candidate.health == null || !candidate.health.IsDead)
+                {
+                    nextHover = candidate;
+                }
+            }
+        }
+
+        if (nextHover != hoveredEnemy)
+        {
+            hoveredEnemy = nextHover;
+            EnemyTargetInteractable.SetHover(nextHover);
+        }
+    }
 
     // Auto attack trigger (animation + delayed hit)
     private void TriggerAutoAttack()
