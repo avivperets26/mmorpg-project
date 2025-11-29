@@ -45,6 +45,18 @@ public class EnemyXpOnDeath : MonoBehaviour
         if (!health) health = GetComponentInParent<EnemyHealth>();
     }
 
+    private void Awake()
+    {
+        if (!playerStats)
+        {
+#if UNITY_2023_1_OR_NEWER
+            playerStats = FindFirstObjectByType<PlayerStats>();
+#else
+            playerStats = FindObjectOfType<PlayerStats>();
+#endif
+        }
+    }
+
     private void OnEnable()
     {
         if (!stats) stats = GetComponentInParent<EnemyStats>();

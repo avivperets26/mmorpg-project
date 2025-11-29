@@ -1,5 +1,6 @@
 // Assets/Scripts/Enemies/Runtime/EnemyAIController.cs
 using UnityEngine;
+using System.Collections.Generic;
 
 namespace Game.Enemies
 {
@@ -58,11 +59,22 @@ namespace Game.Enemies
         [Tooltip("How close we allow getting to the player while chasing.")]
         public float stopDistanceBuffer = 0.1f;
 
+        [Header("Crowd Awareness")]
+        [Tooltip("Radius within which other living enemies will push this one sideways to keep spacing.")]
+        public float separationRadius = 1.25f;
+
+        [Tooltip("Strength of the sideways push when near other enemies.")]
+        public float separationWeight = 1.1f;
+
+        [Tooltip("Clamp separation influence so jitter is minimized.")]
+        public float maxSeparationMagnitude = 2.0f;
+
         [Header("Debug")]
         [SerializeField] private State _state = State.Idle;
 
         private Transform _targetTransform;
         private float _moveSpeed = 2.0f;
+        private static readonly List<EnemyAIController> ActiveEnemies = new List<EnemyAIController>();
 
         private void Reset()
         {
@@ -98,6 +110,9 @@ namespace Game.Enemies
             if (health != null)
                 health.OnDeath += OnDeath;
 
+            if (!ActiveEnemies.Contains(this))
+                ActiveEnemies.Add(this);
+
             ResetAnimatorToIdle();
         }
 
@@ -105,6 +120,8 @@ namespace Game.Enemies
         {
             if (health != null)
                 health.OnDeath -= OnDeath;
+
+            ActiveEnemies.Remove(this);
         }
 
         private void Update()
@@ -178,18 +195,33 @@ namespace Game.Enemies
                 return;
             }
 
-            // Move towards the player (simple planar move)
+            // Move towards the player (simple planar move) with friendly spacing
             Vector3 dir = _targetTransform.position - transform.position;
             dir.y = 0f;
             float planarDist = dir.magnitude;
+            Vector3 separation = CalculateSeparation();
+            Vector3 desiredDir = dir.normalized + separation;
+            desiredDir.y = 0f;
 
-            if (planarDist > stopDistanceBuffer)
+            if (planarDist > stopDistanceBuffer && desiredDir.sqrMagnitude > 0.0001f)
             {
-                Vector3 step = dir.normalized * (_moveSpeed * Time.deltaTime);
-                if (step.magnitude > planarDist)
-                    step = dir.normalized * planarDist;
+                desiredDir.Normalize();
+                float moveDistance = _moveSpeed * Time.deltaTime;
+                Vector3 planarCurrent = new Vector3(transform.position.x, 0f, transform.position.z);
+                Vector3 targetPlanar = new Vector3(_targetTransform.position.x, 0f, _targetTransform.position.z);
+                Vector3 newPlanar = planarCurrent + desiredDir * moveDistance;
 
-                transform.position += step;
+                // Keep a tiny gap from the player so we don't stack on top.
+                float newDist = Vector3.Distance(newPlanar, targetPlanar);
+                if (newDist < stopDistanceBuffer && (planarDist > 0f))
+                {
+                    Vector3 away = (newPlanar - targetPlanar);
+                    if (away.sqrMagnitude < 0.0001f)
+                        away = (planarCurrent - targetPlanar);
+                    newPlanar = targetPlanar + away.normalized * stopDistanceBuffer;
+                }
+
+                transform.position = new Vector3(newPlanar.x, transform.position.y, newPlanar.z);
 
                 // <- THIS is what should push us into Walking
                 if (animator) animator.SetFloat("MoveSpeed", _moveSpeed);
@@ -300,7 +332,55 @@ namespace Game.Enemies
                 Gizmos.color = Color.red;
                 Gizmos.DrawWireSphere(transform.position, combat.AttackRange);
             }
+
+            if (separationRadius > 0f)
+            {
+                Gizmos.color = Color.cyan;
+                Gizmos.DrawWireSphere(transform.position, separationRadius);
+            }
         }
 #endif
+
+        /// <summary>
+        /// Returns a sideways push based on nearby living enemies to keep spacing.
+        /// </summary>
+        private Vector3 CalculateSeparation()
+        {
+            if (separationRadius <= 0f) return Vector3.zero;
+            if (ActiveEnemies.Count <= 1) return Vector3.zero;
+
+            Vector3 separation = Vector3.zero;
+            int neighbors = 0;
+
+            for (int i = 0; i < ActiveEnemies.Count; i++)
+            {
+                var other = ActiveEnemies[i];
+                if (other == null || other == this) continue;
+                if (!other.isActiveAndEnabled) continue;
+                if (other.health != null && other.health.IsDead) continue;
+
+                Vector3 offset = transform.position - other.transform.position;
+                offset.y = 0f;
+                float dist = offset.magnitude;
+
+                if (dist <= 0.0001f || dist > separationRadius)
+                    continue;
+
+                float push = 1f - Mathf.Clamp01(dist / separationRadius);
+                separation += offset.normalized * push;
+                neighbors++;
+            }
+
+            if (neighbors > 0)
+                separation /= neighbors;
+
+            if (separation.sqrMagnitude > 0.0001f)
+            {
+                separation = Vector3.ClampMagnitude(separation * separationWeight, maxSeparationMagnitude);
+                separation.y = 0f;
+            }
+
+            return separation;
+        }
     }
 }
