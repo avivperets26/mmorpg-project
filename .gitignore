@@ -35,6 +35,9 @@ Thumbs.db
 Assets/TerrainDemoScene_URP/
 Assets/TerrainDemoScene_URP.meta
 
+# Ignore Dissolve FX package
+Assets/INab Studio/
+
 # Local-only animation tests
 Assets/Animations/DoubleL/
 
