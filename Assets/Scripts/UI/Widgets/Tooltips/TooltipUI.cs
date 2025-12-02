@@ -1,3 +1,4 @@
+// Assets\Scripts\UI\Widgets\Tooltips\TooltipUI.cs
 using UnityEngine;
 using TMPro;
 

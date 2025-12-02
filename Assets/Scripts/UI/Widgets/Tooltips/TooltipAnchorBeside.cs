@@ -1,4 +1,4 @@
-// Assets/Scripts/UI/TooltipAnchorBeside.cs
+// Assets\Scripts\UI\Widgets\Tooltips\TooltipAnchorBeside.cs
 using UnityEngine;
 using UnityEngine.UI;
 

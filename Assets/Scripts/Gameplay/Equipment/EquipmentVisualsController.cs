@@ -1,4 +1,4 @@
-// Assets/Scripts/Gameplay/Equipment/EquipmentVisualsController.cs
+// Assets\Scripts\Gameplay\Equipment\EquipmentVisualsController.cs
 using System.Collections.Generic;
 using UnityEngine;
 using Game.Items;

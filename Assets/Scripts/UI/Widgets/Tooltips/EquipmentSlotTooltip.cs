@@ -1,3 +1,4 @@
+//Assets\Scripts\UI\Widgets\Tooltips\EquipmentSlotTooltip.cs
 using UnityEngine;
 using UnityEngine.EventSystems;
 using Game.Items;

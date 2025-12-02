@@ -1,3 +1,4 @@
+//Assets\Scripts\UI\Widgets\Tooltips\HideTooltipsOnPanelClose.cs
 using UnityEngine;
 
 /// <summary>

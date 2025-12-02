@@ -1,4 +1,4 @@
-// Assets/Scripts/UI/EquippedSlotTooltipBinder.cs
+// Assets\Scripts\UI\Widgets\Tooltips\EquippedSlotTooltipBinder.cs
 using UnityEngine;
 using UnityEngine.UI;            // <- for Graphic/Image
 using Game.Items;

@@ -1,4 +1,4 @@
-// Assets/Scripts/UI/ItemTooltipUI.cs
+// Assets\Scripts\UI\Widgets\Tooltips\ItemTooltipUI.cs
 using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
@@ -663,13 +663,22 @@ public class ItemTooltipUI : MonoBehaviour
     }
 
     // Human-friendly type label
+    // Human-friendly type label
     private static string EquipTypeLabel(ItemDefinition def)
     {
+        if (def == null) return string.Empty;
+
+        if (def.category == ItemCategory.Shield || def.subtype == ItemSubtype.Shield)
+        {
+            // You can tweak wording later if you prefer just "Shield".
+            return "Shield (Left Hand)";
+        }
+
+        // Off-hand-only items (non-shield)
         if (def.grip == WeaponGrip.OffHandOnly)
         {
             return def.subtype switch
             {
-                ItemSubtype.Shield => "Off-Hand Shield",
                 ItemSubtype.Orb => "Off-Hand Orb",
                 ItemSubtype.Book => "Off-Hand Book",
                 ItemSubtype.Arrows => "Off-Hand Arrows",
@@ -677,6 +686,7 @@ public class ItemTooltipUI : MonoBehaviour
             };
         }
 
+        // Main weapons
         if (def.category == ItemCategory.Weapon)
         {
             string hand = def.grip switch
@@ -685,10 +695,12 @@ public class ItemTooltipUI : MonoBehaviour
                 WeaponGrip.OneHanded => "One-Handed",
                 _ => null
             };
+
             string kind = def.subtype.ToString();
             return hand != null ? $"{hand} {kind}" : kind;
         }
 
+        // Armor / accessories etc.
         return def.subtype switch
         {
             ItemSubtype.Helmet => "Helmet",
@@ -701,6 +713,7 @@ public class ItemTooltipUI : MonoBehaviour
             _ => def.subtype.ToString()
         };
     }
+
 
     public void ClearInlineComparison()
     {

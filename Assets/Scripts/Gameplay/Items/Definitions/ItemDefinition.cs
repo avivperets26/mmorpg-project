@@ -1,4 +1,4 @@
-// Assets/Scripts/Inventory/ItemDefinition.cs
+// Assets\Scripts\Gameplay\Items\Definitions\ItemDefinition.cs
 using UnityEngine;
 using Game.Items;
 

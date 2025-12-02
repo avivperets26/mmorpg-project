@@ -1,4 +1,4 @@
-// Assets\Scripts\UI\Widgets\InventorySlots\EquipmentSlots.cs
+// Assets\Scripts\Gameplay\Equipment\EquipmentSlots.cs
 using UnityEngine;
 
 namespace Game.Items
@@ -47,7 +47,7 @@ namespace Game.Items
                 case ItemSubtype.Orb: slot = EquipmentSlot.Orb; return true;
 
                 // Off-hand shields
-                case ItemSubtype.Shield: slot = EquipmentSlot.LeftHand; alt = EquipmentSlot.RightHand; return true;
+                case ItemSubtype.Shield: slot = EquipmentSlot.LeftHand; alt = default; return true;
 
                 // Weapons (by grip)
                 case ItemSubtype.Bow:

@@ -1,4 +1,4 @@
-// Assets/Scripts/Equipment/EquipmentController.cs
+// Assets\Scripts\Gameplay\Equipment\EquipmentController.cs
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -86,6 +86,8 @@ public class EquipmentController : MonoBehaviour
 
         Debug.Log($"[Equip] TryEquip def='{def.displayName}', subtype={def.subtype}, fromInventory={fromInventory}, frame={Time.frameCount}");
 
+        string reason;
+
         // ------------------------------------------------------------------
         // POTIONS: handle as consumables, not equippable gear
         // ------------------------------------------------------------------
@@ -93,6 +95,29 @@ public class EquipmentController : MonoBehaviour
         {
             Debug.Log($"[Equip] {def.displayName} detected as POTION ({def.subtype}) – routing to TryUsePotion.");
             return TryUsePotion(def, fromInventory);
+        }
+
+        // ------------------------------------------------------------------
+        // SHIELDS: special handling
+        // ------------------------------------------------------------------
+        if (IsShield(def))
+        {
+            // Use "out reason" (no var)
+            if (!MeetsRequirements(def, out reason))
+            {
+                Debug.Log($"[Equip] FAIL requirements for shield {def.displayName}: {reason}");
+                HighlightInvalidSlot(def);
+                return false;
+            }
+
+            var right = GetEquipped(EquipmentSlot.RightHand) as EquipmentItemDefinition;
+            if (right != null && EquipmentSlotMapper.IsTwoHanded(right.grip))
+            {
+                Debug.Log("[Equip] Cannot equip shield while a two-handed weapon is equipped in RightHand.");
+                return false;
+            }
+
+            return EquipIntoSlot(EquipmentSlot.LeftHand, def);
         }
 
         // ------------------------------------------------------------------
@@ -104,7 +129,8 @@ public class EquipmentController : MonoBehaviour
             return false;
         }
 
-        if (!MeetsRequirements(def, out var reason))
+        // Reuse same "reason" variable here too 👇
+        if (!MeetsRequirements(def, out reason))
         {
             Debug.Log($"[Equip] FAIL requirements for {def.displayName}: {reason}");
             HighlightInvalidSlot(def);
@@ -129,6 +155,7 @@ public class EquipmentController : MonoBehaviour
         return EquipIntoSlot(primary, def);
     }
 
+
     // =====================================================================
     // Public API (explicit slot – used by drag & hover)
     // =====================================================================
@@ -137,6 +164,12 @@ public class EquipmentController : MonoBehaviour
         if (def == null) return false;
 
         Debug.Log($"[Equip] TryEquipInto slot={targetSlot}, def='{def.displayName}', fromInventory={fromInventory}, frame={Time.frameCount}");
+
+        if (IsShield(def) && targetSlot != EquipmentSlot.LeftHand)
+        {
+            Debug.Log($"[Equip] Cannot equip shield '{def.displayName}' into {targetSlot}. Shields are LeftHand only.");
+            return false;
+        }
 
         if (!PreviewCanEquip(def, targetSlot, out var reason))
         {
@@ -160,6 +193,26 @@ public class EquipmentController : MonoBehaviour
     public bool PreviewCanEquip(ItemDefinition def, EquipmentSlot targetSlot, out string reason)
     {
         reason = "";
+
+        if (def == null)
+        {
+            reason = "No item";
+            return false;
+        }
+
+        if (IsShield(def))
+        {
+            if (targetSlot != EquipmentSlot.LeftHand)
+            {
+                reason = "Shield can only be equipped in Left Hand.";
+                return false;
+            }
+            // If it's LeftHand, we still want to check level requirements:
+            if (!MeetsRequirements(def, out reason))
+                return false;
+
+            return true; // slot + requirements OK
+        }
 
         if (!EquipmentSlotMapper.TrySuggestSlot(def, out var primary, out var secondary))
         {
@@ -609,6 +662,16 @@ public class EquipmentController : MonoBehaviour
         RefreshUI();
         DumpEquipped();
         return true;
+    }
+
+    // =====================================================================
+    // SHIELD HELPERS
+    // =====================================================================
+
+    private bool IsShield(ItemDefinition def)
+    {
+        if (def == null) return false;
+        return def.category == ItemCategory.Shield || def.subtype == ItemSubtype.Shield;
     }
 
     // =====================================================================

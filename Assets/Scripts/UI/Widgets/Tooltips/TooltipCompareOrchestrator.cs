@@ -1,3 +1,4 @@
+//Assets\Scripts\UI\Widgets\Tooltips\TooltipCompareOrchestrator.cs
 using UnityEngine;
 using Game.Items;
 

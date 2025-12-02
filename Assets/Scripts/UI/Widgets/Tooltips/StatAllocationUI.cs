@@ -1,4 +1,4 @@
-// Assets/Scripts/UI/StatAllocationUI.cs
+// Assets\Scripts\UI\Widgets\Tooltips\StatAllocationUI.cs
 using System.Collections;
 using TMPro;
 using UnityEngine;

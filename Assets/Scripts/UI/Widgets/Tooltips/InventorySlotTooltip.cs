@@ -1,4 +1,4 @@
-// Assets/Scripts/UI/InventorySlotTooltip.cs
+// Assets\Scripts\UI\Widgets\Tooltips\InventorySlotTooltip.cs
 using UnityEngine;
 using UnityEngine.EventSystems;
 using Game.Items;
