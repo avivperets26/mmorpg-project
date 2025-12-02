@@ -71,12 +71,15 @@ public class TooltipCompareOrchestrator : MonoBehaviour
 
         // --- compute baseline (equipped) ---
         ItemDefinition[] baselineDefs = null;
-        EquipmentSlot resolved = default;   // <-- init
-        string note = null;                 // <-- init
+        EquipmentSlot resolved = default;
+        string note = null;
         var baseline = ItemStatsSnapshot.Zero;
 
         if (_equip != null && _equip.GetEquippedForComparison(invInst.def, out resolved, out baselineDefs, out note))
             baseline = _equip.GetCombinedStats(baselineDefs);
+
+        if (!baseline.IsAllZero()) mainTooltip.SetInlineComparisonBaseline(baseline);
+        else mainTooltip.ClearInlineComparison();
 
         UITooltipDebug.Log(enableLogs, this, _tag,
             $"Resolved compare: slot={resolved} defs={(baselineDefs == null ? 0 : baselineDefs.Length)} note='{note}'");
@@ -96,8 +99,9 @@ public class TooltipCompareOrchestrator : MonoBehaviour
 
         mainTooltip.SetContext(TooltipContext.Inventory);
         if (!baseline.IsAllZero()) mainTooltip.SetInlineComparisonBaseline(baseline);
-        else mainTooltip.ClearInlineComparison();   // ✅ keep badge, just remove +/- rows
+        else mainTooltip.ClearInlineComparison();
         mainTooltip.Show(invInst, target);
+
         UITooltipDebug.Log(enableLogs, this, _tag, "MAIN shown (inventory)");
 
         // ----- COMPARE -----

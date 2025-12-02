@@ -459,6 +459,27 @@ public class EquipmentController : MonoBehaviour
             return false;
         }
 
+        // Shields live only in LeftHand and should only compare against other shields.
+        if (IsShield(hovered))
+        {
+            resolvedSlot = EquipmentSlot.LeftHand;
+            var left = GetLeftHandDef();
+
+            if (IsShield(left))
+            {
+                replacementNote = "Replacing: Left Hand Shield";
+                _one[0] = left;
+                baselineDefs = _one;
+            }
+            else
+            {
+                replacementNote = "Left Hand has no shield equipped.";
+                baselineDefs = EMPTY_DEFS; // suppress compare against weapons
+            }
+
+            return true;
+        }
+
         // Resolve mapping first so we always have a valid primary for resolvedSlot.
         if (!EquipmentSlotMapper.TrySuggestSlot(hovered, out var primary, out var secondary))
         {
@@ -480,6 +501,11 @@ public class EquipmentController : MonoBehaviour
             resolvedSlot = EquipmentSlot.RightHand; // install will occupy both hands
             var r = GetRightHandDef();
             var l = GetLeftHandDef();
+
+            // Shields should not be used as weapon baselines.
+            if (IsShield(r)) r = null;
+            if (IsShield(l)) l = null;
+
             if (r == null && l == null)
             {
                 replacementNote = "Replacing: Empty";
@@ -500,6 +526,10 @@ public class EquipmentController : MonoBehaviour
         {
             var right = GetRightHandDef();
             var left = GetLeftHandDef();
+
+            // Only compare weapons vs. weapons; ignore shields.
+            if (IsShield(right)) right = null;
+            if (IsShield(left)) left = null;
 
             if (right != null && left != null)
             {

@@ -370,6 +370,8 @@ public class ItemTooltipUI : MonoBehaviour
             AddStatLineSimple("Durability", $"{inst.currentDurability}/{def.baseDurability}");
         }
 
+
+
         // ----- REQS + TYPE -----
         bool hasStats = _playerStatsForTooltip != null;
         bool levelOk = !hasStats || _playerStatsForTooltip.level >= def.requirements.level;
