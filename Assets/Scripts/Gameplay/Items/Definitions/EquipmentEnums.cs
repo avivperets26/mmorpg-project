@@ -1,4 +1,4 @@
-// Assets/Scripts/Items/Equipment/EquipmentEnums.cs
+// Assets\Scripts\Gameplay\Items\Definitions\EquipmentEnums.cs
 using UnityEngine;
 
 namespace Game.Items
@@ -14,11 +14,12 @@ namespace Game.Items
 
     public enum ItemCategory
     {
-        Weapon,
-        Armor,
-        Accessory,
-        Consumable,
-        Material
+        Weapon = 0,
+        Armor = 1,
+        Accessory = 2,
+        Consumable = 3,
+        Material = 4,
+        Shield = 5
     }
 
     // NOTE: Adding new enum values in the MIDDLE will reindex existing assets.
@@ -48,23 +49,103 @@ namespace Game.Items
     // ---- Helpers (kept) ----
     public static class EquipmentMapping
     {
-        // Only category is used by ItemDefinition.OnValidate
+        // Category inference used by ItemDefinition.OnValidate
         public static ItemCategory GetCategoryForSubtype(ItemSubtype subtype) => subtype switch
         {
+            // Armor
             ItemSubtype.Helmet or ItemSubtype.Chest or ItemSubtype.Gloves or ItemSubtype.Boots or ItemSubtype.Pants
                 => ItemCategory.Armor,
 
+            // Accessories
             ItemSubtype.Ring or ItemSubtype.Amulet or ItemSubtype.Wings or ItemSubtype.Pet or ItemSubtype.Orb or ItemSubtype.Book
                 => ItemCategory.Accessory,
 
+            // Consumables
             ItemSubtype.HealthPotion or ItemSubtype.ManaPotion
                 => ItemCategory.Consumable,
 
+            // NEW: Shields
+            ItemSubtype.Shield
+                => ItemCategory.Shield,
+
+            // Everything else is a weapon
             _ => ItemCategory.Weapon
         };
-    }
 
-    // --- New additions --------------------------------------------------------
+
+        // category → subtype lists (used by the editor) -----------------
+        private static readonly ItemSubtype[] WeaponSubtypes =
+        {
+        ItemSubtype.Sword,
+        ItemSubtype.Axe,
+        ItemSubtype.Bow,
+        ItemSubtype.Dagger,
+        ItemSubtype.Staff,
+        ItemSubtype.Mace,
+        ItemSubtype.Spear
+    };
+
+        private static readonly ItemSubtype[] ArmorSubtypes =
+        {
+        ItemSubtype.Helmet,
+        ItemSubtype.Chest,
+        ItemSubtype.Gloves,
+        ItemSubtype.Boots,
+        ItemSubtype.Pants
+    };
+
+        private static readonly ItemSubtype[] AccessorySubtypes =
+        {
+        ItemSubtype.Ring,
+        ItemSubtype.Amulet,
+        ItemSubtype.Orb,
+        ItemSubtype.Book,
+        ItemSubtype.Arrows,
+        ItemSubtype.Wings,
+        ItemSubtype.Pet
+    };
+
+        private static readonly ItemSubtype[] ConsumableSubtypes =
+        {
+        ItemSubtype.HealthPotion,
+        ItemSubtype.ManaPotion
+    };
+
+        // For shields we keep an internal subtype, but we **won’t** show a dropdown.
+        private static readonly ItemSubtype[] ShieldSubtypes =
+        {
+        ItemSubtype.Shield
+    };
+
+        public static bool CategoryHasSubtype(ItemCategory category) => category switch
+        {
+            ItemCategory.Weapon => true,
+            ItemCategory.Armor => true,
+            ItemCategory.Accessory => true,
+            ItemCategory.Consumable => true,
+            // Shield + Material currently have **no UI** subtype
+            _ => false
+        };
+
+        public static ItemSubtype[] GetSubtypesForCategory(ItemCategory category) => category switch
+        {
+            ItemCategory.Weapon => WeaponSubtypes,
+            ItemCategory.Armor => ArmorSubtypes,
+            ItemCategory.Accessory => AccessorySubtypes,
+            ItemCategory.Consumable => ConsumableSubtypes,
+            ItemCategory.Shield => ShieldSubtypes, // internal, UI can hide it
+            _ => System.Array.Empty<ItemSubtype>()
+        };
+
+        // Handy default if we ever need to set it automatically
+        public static ItemSubtype GetDefaultSubtypeForCategory(ItemCategory category) => category switch
+        {
+            ItemCategory.Shield => ItemSubtype.Shield,
+            ItemCategory.Weapon => WeaponSubtypes.Length > 0 ? WeaponSubtypes[0] : default,
+            ItemCategory.Armor => ArmorSubtypes.Length > 0 ? ArmorSubtypes[0] : default,
+            _ => default
+        };
+    }
 
     // Weapon handling for UI/labeling (doesn't replace slots)
     public enum WeaponGrip

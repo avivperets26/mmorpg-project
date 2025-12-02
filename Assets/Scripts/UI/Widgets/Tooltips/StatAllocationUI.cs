@@ -17,10 +17,10 @@ public class StatAllocationUI : MonoBehaviour
     [System.Serializable]
     public class StatRow
     {
-        public string statName;            // "Strength", "Vitality", ...
-        public TMP_Text nameAndValueLabel;  // merged: "Strength: 12"
-        public Button plusBtn;            // [+] only
-        public TMP_Text detailsText;        // multi-line details under the row
+        public string statName;              // "Strength", "Vitality", ...
+        public TMP_Text nameAndValueLabel;   // merged: "Strength: 12"
+        public Button plusBtn;               // [+] only
+        public TMP_Text detailsText;         // multi-line details under the row
     }
 
     [Header("Rows (order = UI order)")]
@@ -64,6 +64,14 @@ public class StatAllocationUI : MonoBehaviour
     private const string NegOpen = "<color=#FF6C6C>";
     private static string Neg(string t) => $"{NegOpen}{t}{PosClose}";
 
+    /// <summary>
+    /// Unified range formatter: [12.0 min - 14.5 max]
+    /// Always 1 decimal, spaces around '-'.
+    /// </summary>
+    private static string FormatRange(float min, float max)
+    {
+        return $"[{min:0.0} min - {max:0.0} max]";
+    }
 
     // ---------- Unity ----------
 
@@ -124,6 +132,7 @@ public class StatAllocationUI : MonoBehaviour
     {
         if (playerStats) playerStats.OnDerivedChanged -= RefreshAll;
     }
+
     // ---------- Public API: Show / Hide ----------
 
     public void Open()
@@ -342,18 +351,19 @@ public class StatAllocationUI : MonoBehaviour
         float totalCritMin = baseCritMin + gearCrit;
         float totalCritMax = baseCritMax + gearCrit;
 
-        // Deltas (green): + (min–max) and + (x%)
+        // Deltas (green): + (...) and + (x%)
         string deltaPhys = (gearMin == 0 && gearMax == 0)
             ? ""
             : (gearMin == gearMax
                 ? $" {Pos($"+ ({gearMin})")}"
                 : $" {Pos($"+ ({gearMin}–{gearMax})")}");
+
         string deltaCrit = gearCrit > 0f ? $" {Pos($"+ ({gearCrit:0.0}%)")}" : "";
 
         return
-            $"{Dim("Physical Attack")}: {totalMin}–{totalMax}{deltaPhys}\n" +
-            $"{Dim("Attack Success Rate")}: {hitMin}–{hitMax}\n" +
-            $"{Dim("Critical Chance")}: {totalCritMin:0.0}%–{totalCritMax:0.0}%{deltaCrit}";
+            $"{Dim("Physical Attack")}: {FormatRange(totalMin, totalMax)}{deltaPhys}\n" +
+            $"{Dim("Attack Success Rate")}: {FormatRange(hitMin, hitMax)}\n" +
+            $"{Dim("Critical Chance")}: {FormatRange(totalCritMin, totalCritMax)}%{deltaCrit}";
     }
 
     // --- Vitality ---
@@ -389,17 +399,20 @@ public class StatAllocationUI : MonoBehaviour
         int gearArmor = playerStats ? playerStats.equipDefense : 0;
         int baseArmor = Mathf.FloorToInt(0.4f * DEX);
         int totalArmor = baseArmor + gearArmor;
+
+        // For now min == max, but we display a range so later we can introduce variance if we want.
+        float defMin = totalArmor;
+        float defMax = totalArmor;
+
         string deltaArmor = gearArmor > 0 ? $" {Pos($"+ ({gearArmor})")}" : "";
 
         float evasion = 0.20f * DEX;
 
         return
             $"{Dim("Attack Speed")}: {totalAtkSpd:0}{deltaAtkSpd}{apsHint}\n" +
-            $"{Dim("Armor")}: {totalArmor}{deltaArmor}\n" +
+            $"{Dim("Physical Defense")}: {FormatRange(defMin, defMax)}{deltaArmor}\n" +
             $"{Dim("Evasion Rate")}: {evasion:0.0}%";
     }
-
-
 
     // --- Energy ---
     private string BuildDetailsForEnergy()
@@ -430,8 +443,8 @@ public class StatAllocationUI : MonoBehaviour
 
         return
             $"{Dim("Max MP")}: {maxMP}\n" +
-            $"{Dim("Magic Attack")}: {totalMMin}–{totalMMax}{deltaMagic}\n" +
-            $"{Dim("Magic Critical")}: {mcMin}–{mcMax}\n" +
+            $"{Dim("Magic Attack")}: {FormatRange(totalMMin, totalMMax)}{deltaMagic}\n" +
+            $"{Dim("Magic Critical")}: {FormatRange(mcMin, mcMax)}\n" +
             $"{Dim("MP Regen/5s")}: {mp5:0.0}\n" +
             $"{Dim("Magic Resist")}: {totalMRes}{deltaMRes}";
     }

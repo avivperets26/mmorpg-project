@@ -1,7 +1,8 @@
+// Assets\Editor\ItemDefinitionEditor.cs
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEngine;
-using Game.Items; // ItemCategory, ItemSubtype, CharacterClass, etc.
+using Game.Items;
 
 [CustomEditor(typeof(ItemDefinition), true)]
 public class ItemDefinitionEditor : Editor
@@ -156,9 +157,31 @@ public class ItemDefinitionEditor : Editor
         {
             Box(() =>
             {
+                // Category
                 EditorGUILayout.PropertyField(categoryProp);
-                EditorGUILayout.PropertyField(subtypeProp);
-                using (new EditorGUI.DisabledScope(cat != ItemCategory.Weapon))
+
+                // Re-read in case user changed it in this frame
+                cat = (ItemCategory)categoryProp.enumValueIndex;
+
+                // Subtype – filtered per category
+                if (EquipmentMapping.CategoryHasSubtype(cat))
+                {
+                    DrawSubtypePopup(cat, subtypeProp);
+                }
+                else
+                {
+                    // Categories WITHOUT a visible subtype (Shield, Material, etc.)
+                    if (cat == ItemCategory.Shield)
+                    {
+                        // Keep the backing enum in sync so OnValidate works correctly
+                        subtypeProp.enumValueIndex = (int)ItemSubtype.Shield;
+                    }
+
+                    EditorGUILayout.LabelField("Subtype", "None");
+                }
+
+                // Grip – only relevant for real weapons
+                if (cat == ItemCategory.Weapon)
                 {
                     EditorGUILayout.PropertyField(gripProp);
                 }
@@ -201,6 +224,8 @@ public class ItemDefinitionEditor : Editor
         }
 
         // ---------------- Combat Stats & Bonuses (merged) ----------------
+        st  = (ItemSubtype)subtypeProp.enumValueIndex;
+
         fStats = FoldoutHeader(fStats, "Combat Stats & Bonuses");
         if (fStats)
         {
@@ -275,7 +300,6 @@ public class ItemDefinitionEditor : Editor
             Box(() =>
             {
                 EditorGUILayout.PropertyField(defaultTierProp, new GUIContent("Default Tier"));
-                EditorGUILayout.PropertyField(legacyRarityProp, new GUIContent("Legacy Rarity (compat)"));
             });
         }
 
@@ -343,5 +367,33 @@ public class ItemDefinitionEditor : Editor
         EditorGUILayout.Slider(critMultiplier, 1.0f, 5.0f, new GUIContent("Crit Multiplier (x)"));
         attackSpeed.floatValue = EditorGUILayout.FloatField(new GUIContent("Attack Speed (APS)"), attackSpeed.floatValue);
     }
+
+    private void DrawSubtypePopup(ItemCategory cat, SerializedProperty subtypeProp)
+    {
+        var allowed = EquipmentMapping.GetSubtypesForCategory(cat);
+        if (allowed == null || allowed.Length == 0)
+            return;
+
+        // Current value from the serialized enum
+        var currentSubtype = (ItemSubtype)subtypeProp.enumValueIndex;
+
+        // Find its index in the allowed list
+        int currentIndex = System.Array.IndexOf(allowed, currentSubtype);
+        if (currentIndex < 0) currentIndex = 0;
+
+        // Build display names
+        string[] displayNames = new string[allowed.Length];
+        for (int i = 0; i < allowed.Length; i++)
+        {
+            displayNames[i] = ObjectNames.NicifyVariableName(allowed[i].ToString());
+        }
+
+        int newIndex = EditorGUILayout.Popup(new GUIContent("Subtype"), currentIndex, displayNames);
+        if (newIndex >= 0 && newIndex < allowed.Length)
+        {
+            subtypeProp.enumValueIndex = (int)allowed[newIndex];
+        }
+    }
+
 }
 #endif

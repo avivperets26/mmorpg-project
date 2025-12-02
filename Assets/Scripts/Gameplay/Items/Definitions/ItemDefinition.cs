@@ -79,7 +79,9 @@ public class ItemDefinition : ScriptableObject
 
     // Tier / Rarity
     public ItemTier defaultTier = ItemTier.Common;
-    public ItemRarity legacyRarity = ItemRarity.Common;
+
+    [HideInInspector]
+    public ItemRarity legacyRarity;
 
     public Color TierLabelColor => RarityRules.GetLabelColor(defaultTier);
     public static Color RarityColor(ItemRarity r) => r switch
