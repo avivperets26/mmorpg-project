@@ -134,8 +134,6 @@ public class TooltipCompareOrchestrator : MonoBehaviour
     public void ShowForEquipped(ItemInstance inst, RectTransform target)
     {
         _suppressInventoryCompare = true;
-        UITooltipDebug.Log(enableLogs, this, _tag,
-            $"ShowForEquipped(inst={(inst?.def?.displayName ?? "null")}, target={target?.name}) -> suppression ON");
 
         if (compareTooltip) compareTooltip.Hide();
         mainTooltip.SetContext(TooltipContext.Equipped);

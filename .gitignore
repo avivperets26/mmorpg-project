@@ -38,9 +38,13 @@ Assets/TerrainDemoScene_URP.meta
 # Ignore Dissolve FX package
 Assets/INab Studio/
 
+# Local-only item assets
+Assets/Items/Fantasy Medieval Potions
+
 # Local-only animation tests
 Assets/Animations/DoubleL/
 Assets/Animations/SwordShieldAnimations
+Assets/Animations/Raise Creation
 
 # Unity cache/artifacts
 # Keep Assets and ProjectSettings!
