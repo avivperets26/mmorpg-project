@@ -4,6 +4,10 @@ using UnityEngine.InputSystem;
 using System.Collections;
 using UnityEngine.EventSystems;
 using Game.Enemies;
+using Game.Equipment;
+using Game.Items;
+using System.Linq;
+
 
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
@@ -36,6 +40,55 @@ public class PlayerController : MonoBehaviour
     [Header("Animator States")]
     [Tooltip("Animator state for basic locomotion (idle/walk/run blend tree). Set this to your locomotion state name.")]
     public string locomotionState = "Locomotion"; // <-- set in Inspector to your actual locomotion state
+
+    [System.Serializable]
+    private struct AnimatorStanceConfig
+    {
+        public string idleState;
+        public string attackState;
+        public string[] attackCombo;
+    }
+
+    [Header("Combat Stances (Animator States)")]
+    [SerializeField]
+    private AnimatorStanceConfig unarmedStance = new AnimatorStanceConfig
+    {
+        idleState = "UH_Idle",
+        attackState = "UH_Atk_Combo",
+        attackCombo = null
+    };
+
+    [SerializeField]
+    private AnimatorStanceConfig oneHandStance = new AnimatorStanceConfig
+    {
+        idleState = "1H_Idle",
+        attackState = "1H_Atk_Combo",
+        attackCombo = null
+    };
+
+    [SerializeField]
+    private AnimatorStanceConfig oneHandShieldStance = new AnimatorStanceConfig
+    {
+        idleState = "1HS_Idle",
+        attackState = "1HS_Atk_R",
+        attackCombo = new[] { "1HS_Atk_R", "1HS_Atk_L", "1HS_Atk_Heavy" }
+    };
+
+    [SerializeField]
+    private AnimatorStanceConfig twoHandStance = new AnimatorStanceConfig
+    {
+        idleState = "2H_Idle",
+        attackState = "2H_Atk_Combo",
+        attackCombo = null
+    };
+
+    [SerializeField]
+    private AnimatorStanceConfig dualWieldStance = new AnimatorStanceConfig
+    {
+        idleState = "DW_Idle",
+        attackState = "DW_Atk_Combo",
+        attackCombo = null
+    };
 
     [Header("Movement")]
     public float moveSpeed = 5f;
@@ -82,6 +135,7 @@ public class PlayerController : MonoBehaviour
     // Components / state
     private CharacterController cc;
     private PlayerStats stats;
+    [SerializeField] private EquipmentController equipment;
 
     // Motion
     private Vector3 velocity; // vertical (gravity)
@@ -110,6 +164,8 @@ public class PlayerController : MonoBehaviour
 
     // --- Combat / animation (visual) ---
     private bool isInCombat;
+    private enum WeaponStance { Unarmed, OneHand, OneHandShield, TwoHand, DualWield }
+    private WeaponStance currentStance = WeaponStance.Unarmed;
 
     // Auto-attack click targeting
     private IDamageable pendingAttackTarget;
@@ -126,6 +182,9 @@ public class PlayerController : MonoBehaviour
     // Attack cycle cache
     private float lastAttackCycleDuration = 0f;
     private float attackInputLockTimer = 0f;
+    private int attackComboIndex = 0;
+    private string lastAttackStateName;
+    private string lastAttackStatePath;
 
     // -----------------------------------------------------------------------
 
@@ -135,8 +194,19 @@ public class PlayerController : MonoBehaviour
         cc = GetComponent<CharacterController>();
         stats = GetComponent<PlayerStats>();
 
+        if (equipment != null)
+        {
+            equipment.HasShieldChanged += OnHasShieldChanged;
+            equipment.EquippedChanged += OnEquipmentChanged;
+        }
+
         if (groundMask.value == 0)
             groundMask = LayerMask.GetMask("Default");
+    }
+
+    private void Start()
+    {
+        RefreshAnimatorStance(forceCrossfade: true);
     }
 
     void Update()
@@ -222,6 +292,8 @@ public class PlayerController : MonoBehaviour
             if (!ok)
             {
                 shieldHeld = false;
+                if (animator)
+                    animator.SetBool("IsBlocking", false);
                 Debug.Log("Shield DOWN (stamina exhausted)");
             }
         }
@@ -334,6 +406,17 @@ public class PlayerController : MonoBehaviour
         }
 
         // Apply movement
+        if (shieldHeld)
+        {
+            Vector2 planarMove = new Vector2(motion.x, motion.z);
+            if (planarMove.sqrMagnitude > 0.0001f)
+            {
+                shieldHeld = false;
+                if (animator)
+                    animator.SetBool("IsBlocking", false);
+            }
+        }
+
         cc.Move((motion + new Vector3(0f, velocity.y, 0f)) * Time.deltaTime);
 
         float horizontalSpeed = new Vector3(motion.x, 0f, motion.z).magnitude;
@@ -389,6 +472,26 @@ public class PlayerController : MonoBehaviour
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
+    private int GetAnimatorLayerForCurrentStance()
+    {
+        // All stances live on base layer (index 0) in this controller.
+        return 0;
+    }
+
+    private string GetAnimatorStatePath(WeaponStance stance, string stateShortName)
+    {
+        string subMachine = stance switch
+        {
+            WeaponStance.Unarmed => "Combat_Unarmed",
+            WeaponStance.OneHand => "Combat_1H",
+            WeaponStance.OneHandShield => "Combat_1H_Shield",
+            WeaponStance.TwoHand => "Combat_2H",
+            WeaponStance.DualWield => "Combat_Duel_Weapon",
+            _ => "Combat_1H"
+        };
+
+        return $"Base Layer.{subMachine}.{stateShortName}";
+    }
 
     private void UpdateHoverTarget()
     {
@@ -437,6 +540,115 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private AnimatorStanceConfig GetAnimatorConfig(WeaponStance stance)
+    {
+        return stance switch
+        {
+            WeaponStance.Unarmed => unarmedStance,
+            WeaponStance.OneHand => oneHandStance,
+            WeaponStance.OneHandShield => oneHandShieldStance,
+            WeaponStance.TwoHand => twoHandStance,
+            WeaponStance.DualWield => dualWieldStance,
+            _ => oneHandStance
+        };
+    }
+
+    private WeaponStance DetermineStanceFromEquipment()
+    {
+        if (!equipment) return WeaponStance.Unarmed;
+
+        ItemDefinition right = equipment.GetEquipped(EquipmentSlot.RightHand);
+        ItemDefinition left = equipment.GetEquipped(EquipmentSlot.LeftHand);
+
+        bool shieldEquipped = IsShieldItem(left);
+        bool rightTwoHanded = IsTwoHandedWeapon(right);
+
+        if (rightTwoHanded)
+            return WeaponStance.TwoHand;
+
+        bool rightOneHand = IsOneHandedWeapon(right);
+        bool leftOneHand = IsOneHandedWeapon(left);
+
+        if (shieldEquipped && rightOneHand)
+            return WeaponStance.OneHandShield;
+
+        if (rightOneHand && leftOneHand)
+            return WeaponStance.DualWield;
+
+        if (rightOneHand || leftOneHand)
+            return WeaponStance.OneHand;
+
+        return WeaponStance.Unarmed;
+    }
+
+    private void RefreshAnimatorStance(bool forceCrossfade = false)
+    {
+        WeaponStance next = DetermineStanceFromEquipment();
+        bool stanceChanged = forceCrossfade || next != currentStance;
+        currentStance = next;
+        attackComboIndex = 0;
+
+        AnimatorStanceConfig config = GetAnimatorConfig(next);
+        locomotionState = config.idleState;
+        attackAnimationState = config.attackState;
+        lastAttackStateName = attackAnimationState;   // short name
+        lastAttackStatePath = GetAnimatorStatePath(currentStance, lastAttackStateName);
+
+        if (!animator)
+            return;
+
+        bool hasShield = next == WeaponStance.OneHandShield;
+        animator.SetBool("HasShield", hasShield);
+
+        if (stanceChanged && !string.IsNullOrEmpty(locomotionState))
+        {
+            // we crossfade directly to the idle state on base layer (0)
+            animator.CrossFadeInFixedTime(GetAnimatorStatePath(currentStance, locomotionState), 0.1f, 0);
+        }
+    }
+
+
+    private void ResetAttackCombo()
+    {
+        attackComboIndex = 0;
+        lastAttackStateName = attackAnimationState;
+        lastAttackStatePath = GetAnimatorStatePath(currentStance, lastAttackStateName);
+    }
+
+    private void StopMovementImmediately()
+    {
+        hasClickTarget = false;
+        autoAttackOnArrival = false;
+        pendingAttackTarget = null;
+        if (animator) animator.SetFloat("Speed", 0f);
+    }
+
+    private void ClearAttackParam()
+    {
+        if (!animator) return;
+
+        var attackParam = animator.parameters.FirstOrDefault(p => p.name == "Attack");
+        switch (attackParam.type)
+        {
+            case AnimatorControllerParameterType.Trigger:
+                animator.ResetTrigger("Attack");
+                break;
+            case AnimatorControllerParameterType.Bool:
+                animator.SetBool("Attack", false);
+                break;
+        }
+    }
+
+
+    private static bool IsOneHandedWeapon(ItemDefinition def) =>
+        def != null && def.category == ItemCategory.Weapon && def.grip == WeaponGrip.OneHanded;
+
+    private static bool IsTwoHandedWeapon(ItemDefinition def) =>
+        def != null && def.category == ItemCategory.Weapon && def.grip == WeaponGrip.TwoHanded;
+
+    private static bool IsShieldItem(ItemDefinition def) =>
+        def != null && (def.category == ItemCategory.Shield || def.subtype == ItemSubtype.Shield);
+
     // Auto attack trigger (animation + delayed hit)
     private void TriggerAutoAttack()
     {
@@ -454,14 +666,32 @@ public class PlayerController : MonoBehaviour
         if (animator)
         {
             animator.SetBool("IsCombat", true);  // stay in combat idle/walk
-            // Force the attack animation immediately so we don't wait on long state exit times.
-            if (!string.IsNullOrEmpty(attackAnimationState))
+
+            string stateName = GetNextAttackStateName();   // e.g. "1HS_Atk_Combo"
+            lastAttackStateName = stateName;
+
+            if (!string.IsNullOrEmpty(stateName))
             {
-                animator.CrossFadeInFixedTime(
-                    attackAnimationState,
-                    Mathf.Max(0f, attackCrossfade),
-                    0,
-                    0f);
+                int layer = GetAnimatorLayerForCurrentStance(); // 0
+                int hash = Animator.StringToHash(stateName);
+
+                bool has = animator.HasState(layer, hash);
+                Debug.Log($"[Attack] stance={currentStance} stateName={stateName} layer={layer} hasState={has}");
+
+                if (has)
+                {
+                    animator.CrossFadeInFixedTime(
+                        stateName,                         // SHORT NAME ONLY
+                        Mathf.Max(0f, attackCrossfade),
+                        layer,
+                        0f);
+                    ClearAttackParam(); // drop trigger/bool immediately
+                }
+                else
+                {
+                    Debug.LogWarning($"Attack state '{stateName}' not found on layer {layer}, using Attack trigger instead");
+                    animator.SetTrigger("Attack");
+                }
             }
             else
             {
@@ -472,6 +702,7 @@ public class PlayerController : MonoBehaviour
         // Apply the actual hit slightly after the swing starts
         StartCoroutine(PerformAutoAttackAfterDelay(attackHitDelay));
     }
+
 
     // Rotates the player to face either a clicked damageable or the clicked point.
     private void FaceMouseClickDirection()
@@ -617,12 +848,20 @@ public class PlayerController : MonoBehaviour
 
     private bool IsInAttackState()
     {
-        if (!animator || string.IsNullOrEmpty(attackAnimationState))
-            return false;
+        if (!animator) return false;
 
-        AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(0);
-        return info.IsName(attackAnimationState);
+        string stateName = !string.IsNullOrEmpty(lastAttackStateName)
+            ? lastAttackStateName
+            : attackAnimationState;
+
+        if (string.IsNullOrEmpty(stateName)) return false;
+
+        int layer = GetAnimatorLayerForCurrentStance();
+        AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(layer);
+        return info.IsName(stateName);   // short name
     }
+
+
 
 
     private bool TryGetDamageableFromMouse(out IDamageable dmg, out Vector3 hitPoint)
@@ -662,6 +901,8 @@ public class PlayerController : MonoBehaviour
         attackLoopActive = false;
         attackSwingInProgress = false;
         currentAttackTarget = null;
+        ResetAttackCombo();
+        ClearAttackParam();
 
         if (attackLoopRoutine != null)
         {
@@ -677,12 +918,15 @@ public class PlayerController : MonoBehaviour
 
         // Always stop the loop + clear target
         StopAutoAttackLoop();
+        ResetAttackCombo();
+        ClearAttackParam();
 
         // Only force a crossfade if we were mid-attack
         if (animator && (wasLooping || wasInAttackState))
         {
             if (!string.IsNullOrEmpty(locomotionState))
             {
+                // Just use the short state name on base layer (0)
                 animator.CrossFadeInFixedTime(locomotionState, 0.1f, 0);
             }
         }
@@ -693,7 +937,6 @@ public class PlayerController : MonoBehaviour
             animator.SetBool("IsCombat", false);
         }
     }
-
 
     private void FaceCurrentAttackTarget()
     {
@@ -715,13 +958,16 @@ public class PlayerController : MonoBehaviour
 
     private float GetAttackCycleDuration()
     {
-        // Require at least the fallback so we never get the short "first repeat" burst.
         float minDuration = Mathf.Max(attackRepeatFallback, attackHitDelay + attackCrossfade);
+        string stateToCheck = !string.IsNullOrEmpty(lastAttackStateName)
+            ? lastAttackStateName
+            : attackAnimationState;
 
-        if (animator && !string.IsNullOrEmpty(attackAnimationState))
+        if (animator && !string.IsNullOrEmpty(stateToCheck))
         {
-            AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(0);
-            if (info.IsName(attackAnimationState))
+            int layer = GetAnimatorLayerForCurrentStance();
+            AnimatorStateInfo info = animator.GetCurrentAnimatorStateInfo(layer);
+            if (info.IsName(stateToCheck))
             {
                 float animDuration = info.length / Mathf.Max(animator.speed, 0.0001f);
                 lastAttackCycleDuration = Mathf.Max(animDuration, minDuration);
@@ -729,7 +975,6 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        // If we can't read the state yet (e.g., first frame after crossfade), stick to the last known duration.
         if (lastAttackCycleDuration > 0.0001f)
             return Mathf.Max(lastAttackCycleDuration, minDuration);
 
@@ -958,7 +1203,15 @@ public class PlayerController : MonoBehaviour
         {
             if (stats != null && stats.CurrentStamina >= minStaminaToRaiseShield)
             {
+                StopMovementImmediately(); // halt walking the moment shield is raised
                 shieldHeld = true;
+
+                // Enter combat stance when raising shield
+                isInCombat = true;
+                combatTimer = combatFadeTime;
+                if (animator)
+                    animator.SetBool("IsCombat", true);
+
                 Debug.Log("Shield UP");
             }
             else
@@ -974,7 +1227,12 @@ public class PlayerController : MonoBehaviour
 
             shieldHeld = false;
         }
+
+        // Drive animator "IsBlocking" flag from shieldHeld
+        if (animator)
+            animator.SetBool("IsBlocking", shieldHeld);
     }
+
 
     // R: Parry (Action: Parry)
     public void OnParry(InputAction.CallbackContext ctx)
@@ -987,8 +1245,12 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        if (animator)
+            animator.SetTrigger("ParryTrigger");
+
         Debug.Log("Parry performed - TODO: start perfect block window.");
     }
+
 
     // Left Ctrl: Sprint hold (Action: Sprint)
     public void OnSprint(InputAction.CallbackContext ctx)
@@ -1035,4 +1297,38 @@ public class PlayerController : MonoBehaviour
         if (!ctx.performed) return;
         Debug.Log("Use Potion Slot 3 (E) - TODO: hook to consumable system.");
     }
+
+    private void OnEquipmentChanged()
+    {
+        RefreshAnimatorStance();
+    }
+
+    private void OnDestroy()
+    {
+        if (equipment != null)
+        {
+            equipment.HasShieldChanged -= OnHasShieldChanged;
+            equipment.EquippedChanged -= OnEquipmentChanged;
+        }
+    }
+
+    private void OnHasShieldChanged(bool hasShield)
+    {
+        if (animator)
+            animator.SetBool("HasShield", hasShield);
+
+        RefreshAnimatorStance();
+    }
+
+    private string GetNextAttackStateName()
+    {
+        AnimatorStanceConfig config = GetAnimatorConfig(currentStance);
+
+        // Always return the single combo clip for the stance
+        if (!string.IsNullOrEmpty(config.attackState))
+            return config.attackState;
+
+        return attackAnimationState;   // fallback (but in practice should never be used)
+    }
+
 }

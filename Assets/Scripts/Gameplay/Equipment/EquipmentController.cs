@@ -47,7 +47,19 @@ public class EquipmentController : MonoBehaviour
 
     public event Action EquippedChanged;
     private void RaiseEquippedChanged() => EquippedChanged?.Invoke();
+    public event Action<bool> HasShieldChanged;
 
+    private bool _hasShield; // cached left-hand shield state
+
+    private void UpdateHasShieldFlag()
+    {
+        bool newHasShield = IsShield(GetEquipped(EquipmentSlot.LeftHand));
+        if (newHasShield == _hasShield)
+            return;
+
+        _hasShield = newHasShield;
+        HasShieldChanged?.Invoke(_hasShield);
+    }
     private void Awake()
     {
         InitSlot(EquipmentSlot.Helm, helm, "Helm");
@@ -268,6 +280,7 @@ public class EquipmentController : MonoBehaviour
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
 
+        UpdateHasShieldFlag();
         RaiseEquippedChanged();
         RefreshUI();
         return true;
@@ -294,6 +307,7 @@ public class EquipmentController : MonoBehaviour
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
 
+        UpdateHasShieldFlag();
         RaiseEquippedChanged();
         RefreshUI();
         DumpEquipped();
@@ -688,6 +702,7 @@ public class EquipmentController : MonoBehaviour
 
         if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
 
+        UpdateHasShieldFlag();
         RaiseEquippedChanged();
         RefreshUI();
         DumpEquipped();
