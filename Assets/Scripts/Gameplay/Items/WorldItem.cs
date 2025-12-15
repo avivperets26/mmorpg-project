@@ -22,10 +22,12 @@ public class WorldItem : MonoBehaviour
 
     private bool _hasLanded;
     private Rigidbody _rb;
+    private float _bottomOffset; // distance from pivot to collider bottom in resting pose
 
     private void Awake()
     {
         _rb = GetComponent<Rigidbody>();
+        _bottomOffset = ComputeBottomOffset();
     }
 
     public void Init(ItemDefinition def, int stack)
@@ -75,16 +77,8 @@ public class WorldItem : MonoBehaviour
             groundPoint = groundHit.point;
         }
 
-        // Step 2 – offset by collider half height so we don't sink
-        float halfHeight = 0f;
-        var col = GetComponent<Collider>();
-        if (col != null)
-        {
-            // bounds.extents is in world space and already accounts for scale
-            halfHeight = col.bounds.extents.y;
-        }
-
-        return groundPoint + Vector3.up * halfHeight;
+        // Step 2 – offset by collider bottom distance so it rests on the surface
+        return groundPoint + Vector3.up * _bottomOffset;
     }
 
     private IEnumerator JumpRoutine(Vector3 from, Vector3 to)
@@ -125,6 +119,17 @@ public class WorldItem : MonoBehaviour
             _rb.linearVelocity = Vector3.zero;
             _rb.angularVelocity = Vector3.zero;
         }
+    }
+
+    private float ComputeBottomOffset()
+    {
+        var col = GetComponent<Collider>();
+        if (col == null) return 0f;
+
+        // Distance from pivot Y to collider bottom in world space (using resting pose).
+        float bottom = col.bounds.min.y;
+        float pivotY = transform.position.y;
+        return Mathf.Max(0f, pivotY - bottom);
     }
 
     // later: pickup logic here

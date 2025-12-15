@@ -12,6 +12,8 @@ public class HoverHighlighter : MonoBehaviour
     public Camera raycastCamera;
     public LayerMask interactableMask;
     public float maxDistance = 100f;
+    [Tooltip("Include trigger colliders (recommended for pickup triggers).")]
+    public QueryTriggerInteraction triggerInteraction = QueryTriggerInteraction.Collide;
 
     [Header("Optional: cursor center mode")]
     public bool useScreenCenter = false;
@@ -43,7 +45,7 @@ public class HoverHighlighter : MonoBehaviour
 
         Ray ray = raycastCamera.ScreenPointToRay(screenPos);
 
-        if (Physics.Raycast(ray, out RaycastHit hit, maxDistance, interactableMask, QueryTriggerInteraction.Ignore))
+        if (Physics.Raycast(ray, out RaycastHit hit, maxDistance, interactableMask, triggerInteraction))
         {
             var root = hit.transform.root;
 

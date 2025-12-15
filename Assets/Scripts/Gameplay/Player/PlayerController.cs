@@ -7,6 +7,7 @@ using Game.Enemies;
 using Game.Equipment;
 using Game.Items;
 using System.Linq;
+using System.Collections.Generic;
 
 
 [RequireComponent(typeof(CharacterController))]
@@ -268,6 +269,27 @@ public class PlayerController : MonoBehaviour
 
                     // Ground click stops any running attack loop AND cancels attack anim.
                     CancelCurrentAttack(resetCombatPose: false);
+                }
+                // 3) Fallback: we hit something else (e.g. pickup collider). Try to find ground behind it.
+                else
+                {
+                    bool hitInteractable = hit.collider.GetComponentInParent<IInteractable>() != null ||
+                                           hit.collider.gameObject.layer == LayerMask.NameToLayer("Interactable");
+
+                    // 3) Fallback: if the only thing we hit is an interactable (e.g. pickup collider),
+                    // raycast again just against ground so click-to-move still works around pickups.
+                    if (hitInteractable &&
+                        Physics.Raycast(ray, out RaycastHit groundHit, faceMouseMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
+                    {
+                        clickTargetWorld = groundHit.point;
+                        hasClickTarget = true;
+
+                        autoAttackOnArrival = false;
+                        pendingAttackTarget = null;
+
+                        EnemyTargetInteractable.ClearSelection();
+                        CancelCurrentAttack(resetCombatPose: false);
+                    }
                 }
             }
             else
@@ -1051,16 +1073,25 @@ public class PlayerController : MonoBehaviour
             mouseScreenPos = ctx.ReadValue<Vector2>();
     }
 
+    // Allow world-space pickup labels to coexist with click-to-move: ignore UI hits on Interactable layer.
     private bool IsPointerOverUI()
     {
         if (EventSystem.current == null) return false;
 
-        if (EventSystem.current.IsPointerOverGameObject())
-            return true;
-
-        for (int i = 0; i < Input.touchCount; i++)
+        var pointerData = new PointerEventData(EventSystem.current)
         {
-            if (EventSystem.current.IsPointerOverGameObject(Input.GetTouch(i).fingerId))
+            position = mouseScreenPos
+        };
+
+        var results = new List<RaycastResult>();
+        EventSystem.current.RaycastAll(pointerData, results);
+
+        int interactableLayer = LayerMask.NameToLayer("Interactable");
+
+        foreach (var r in results)
+        {
+            // Any UI hit that is NOT on the Interactable layer should block movement (e.g. HUD).
+            if (r.gameObject.layer != interactableLayer)
                 return true;
         }
 

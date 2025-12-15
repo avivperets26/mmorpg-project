@@ -19,22 +19,26 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
     public Transform Transform => transform;
     public float MaxUseDistance => pickupRadius;
 
+
     void Reset()
     {
         var col = GetComponent<Collider>();
-        if (col) col.isTrigger = false; // solid collider for click-raycast
-        gameObject.layer = LayerMask.NameToLayer("Default"); // or your "Interactable" layer
+        if (col)
+            col.isTrigger = true;
+
+        gameObject.layer = LayerMask.NameToLayer("Interactable");
     }
 
     void Awake()
     {
+        var col = GetComponent<Collider>();
+        if (col)
+            col.isTrigger = true;
+
         if (def && label)
         {
             label.text = def.displayName;
-            // WAS: ItemDefinition.RarityColor(def.rarity)
             label.color = RarityRules.GetLabelColor(def.defaultTier);
-            // If you prefer legacy colors, use:
-            // label.color = ItemDefinition.RarityColor(def.legacyRarity);
         }
     }
 
