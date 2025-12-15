@@ -1234,6 +1234,11 @@ public class PlayerController : MonoBehaviour
         {
             if (stats != null && stats.CurrentStamina >= minStaminaToRaiseShield)
             {
+                // Stop any active auto-attacks before raising the shield.
+                CancelCurrentAttack(resetCombatPose: false);
+                autoAttackOnArrival = false;
+                pendingAttackTarget = null;
+
                 StopMovementImmediately(); // halt walking the moment shield is raised
                 shieldHeld = true;
 
