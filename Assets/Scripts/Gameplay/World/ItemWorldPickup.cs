@@ -13,12 +13,11 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
     [Min(0.1f)] public float pickupRadius = 2.0f;
 
     [Header("UI (optional)")]
-    // ✅ Use TMP_Text so you can assign TextMeshProUGUI
+    // Use TMP_Text so you can assign TextMeshProUGUI
     public TMP_Text label;
 
     public Transform Transform => transform;
     public float MaxUseDistance => pickupRadius;
-
 
     void Reset()
     {
@@ -46,7 +45,7 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
     {
         if (!def)
         {
-            Debug.LogWarning("❌ Missing ItemDefinition!");
+            Debug.LogWarning("[Pickup] Missing ItemDefinition!");
             return;
         }
 
@@ -54,6 +53,10 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
         var inv =
             interactor.GetComponent<PlayerInventory>() ??
             interactor.GetComponentInParent<PlayerInventory>();
+
+        var equip =
+            interactor.GetComponent<EquipmentController>() ??
+            interactor.GetComponentInParent<EquipmentController>();
 
         if (!inv)
         {
@@ -64,21 +67,31 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
 #endif
         }
 
-        if (!inv)
+        if (!equip)
         {
-            Debug.LogWarning("❌ No PlayerInventory found for interactor! " +
-                             "Make sure PlayerInventory exists in the scene.");
+#if UNITY_2023_1_OR_NEWER
+            equip = FindFirstObjectByType<EquipmentController>();
+#else
+            equip = FindObjectOfType<EquipmentController>();
+#endif
+        }
+
+        if (!inv && !equip)
+        {
+            Debug.LogWarning("[Pickup] No PlayerInventory/EquipmentController found for interactor!");
             return;
         }
 
-        bool added = inv.TryAdd(def);
+        // Auto-equip into an empty slot if requirements are met; else fall back to inventory.
+        bool equipped = equip != null && equip.TryAutoEquipFromPickup(def);
+        bool added = equipped || (inv != null && inv.TryAdd(def));
         if (added)
         {
             Destroy(gameObject);
         }
         else
         {
-            Debug.Log("⚠️ Inventory full or add failed");
+            Debug.Log("[Pickup] Inventory full or add failed");
         }
     }
 
@@ -95,14 +108,8 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
         if (label != null)
         {
             label.text = def.displayName;
-            // Use your tier color helper (same as in Awake)
             label.color = RarityRules.GetLabelColor(def.defaultTier);
-            // or, if you prefer legacy:
-            // label.color = ItemDefinition.RarityColor(def.legacyRarity);
         }
-
-        // If you ever track stack count on the pickup itself, update it here too.
-        // (Right now you don't, so we just ignore stackCount.)
     }
 
 #if UNITY_EDITOR

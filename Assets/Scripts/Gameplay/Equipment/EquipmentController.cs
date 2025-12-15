@@ -92,6 +92,82 @@ public class EquipmentController : MonoBehaviour
     // =====================================================================
     // Public API (generic auto-slot)
     // =====================================================================
+    /// <summary>
+    /// Auto-equip logic for world pickups: only equips if requirements are met AND the target slot(s) are empty.
+    /// Does not replace anything; falls back to inventory when this returns false.
+    /// </summary>
+    public bool TryAutoEquipFromPickup(ItemDefinition def)
+    {
+        if (def == null) return false;
+
+        // Potions and non-equipment should go to inventory.
+        if (IsPotion(def)) return false;
+
+        if (!MeetsRequirements(def, out _)) return false;
+
+        // Shields: only LeftHand and only if empty, and no 2H weapon in right hand.
+        if (IsShield(def))
+        {
+            if (GetEquipped(EquipmentSlot.LeftHand) != null) return false;
+
+            var right = GetEquipped(EquipmentSlot.RightHand) as EquipmentItemDefinition;
+            if (right != null && EquipmentSlotMapper.IsTwoHanded(right.grip)) return false;
+
+            return EquipIntoSlot(EquipmentSlot.LeftHand, def);
+        }
+
+        // Map slot(s)
+        if (!EquipmentSlotMapper.TrySuggestSlot(def, out var primary, out var secondary))
+            return false;
+
+        // Two-handed: require both hands free.
+        if (def.grip == WeaponGrip.TwoHanded)
+        {
+            if (GetEquipped(EquipmentSlot.RightHand) != null) return false;
+            if (GetEquipped(EquipmentSlot.LeftHand) != null) return false;
+            return EquipIntoSlot(EquipmentSlot.RightHand, def);
+        }
+
+        // One-handers or off-hand only: require a free compatible hand.
+        if (primary is EquipmentSlot.RightHand or EquipmentSlot.LeftHand ||
+            secondary is EquipmentSlot.RightHand or EquipmentSlot.LeftHand)
+        {
+            // Prefer the suggested slot if it's free, else the other hand if allowed and free.
+            if (primary == EquipmentSlot.RightHand || primary == EquipmentSlot.LeftHand)
+            {
+                var alt = primary == EquipmentSlot.RightHand ? EquipmentSlot.LeftHand : EquipmentSlot.RightHand;
+
+                if (GetEquipped(primary) == null)
+                    return EquipIntoSlot(primary, def);
+
+                if (secondary != default && secondary == alt && GetEquipped(alt) == null)
+                    return EquipIntoSlot(alt, def);
+
+                if (GetEquipped(alt) == null && (secondary == alt || def.grip == WeaponGrip.OneHanded))
+                    return EquipIntoSlot(alt, def);
+
+                return false;
+            }
+
+            // Secondary hand mapping (e.g., off-hand-only)
+            if (secondary is EquipmentSlot.RightHand or EquipmentSlot.LeftHand)
+            {
+                if (GetEquipped(secondary) == null)
+                    return EquipIntoSlot(secondary, def);
+                return false;
+            }
+        }
+
+        // All other slots: require empty slot (primary first, else secondary if provided).
+        if (GetEquipped(primary) == null)
+            return EquipIntoSlot(primary, def);
+
+        if (secondary != default && GetEquipped(secondary) == null)
+            return EquipIntoSlot(secondary, def);
+
+        return false;
+    }
+
     public bool TryEquip(ItemDefinition def, bool fromInventory = false)
     {
         if (def == null) return false;
