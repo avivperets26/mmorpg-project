@@ -14,15 +14,21 @@ public class WorldItem : MonoBehaviour
     [Header("Animation")]
     [SerializeField] private float jumpDuration = 0.45f;
     [SerializeField] private float jumpHeight = 0.9f;
-    [SerializeField] private float spinSpeed = 720f;    // for the flip in the air
+    [SerializeField] private float spinSpeed = 720f;
+
 
     [Header("Grounding")]
-    [Tooltip("Layer(s) considered ground for final landing alignment.")]
-    [SerializeField] private LayerMask groundMask = -1;   // default: Everything
+    [SerializeField] private LayerMask groundMask = -1;
+
+    [Tooltip("Auto snap to ground when spawned/scene-loaded (for manually placed pickups).")]
+    [SerializeField] private bool snapToGroundOnEnable = true;
+
+    [Tooltip("How much to float above ground (good for grass).")]
+    [SerializeField] private float hoverHeight = 0.05f;
 
     private bool _hasLanded;
     private Rigidbody _rb;
-    private float _bottomOffset; // distance from pivot to collider bottom in resting pose
+    private float _bottomOffset;
 
     private void Awake()
     {
@@ -30,6 +36,14 @@ public class WorldItem : MonoBehaviour
         _bottomOffset = ComputeBottomOffset();
     }
 
+    private void OnEnable()
+    {
+        // If it's a scene-placed item and no animation has played, snap it.
+        if (snapToGroundOnEnable && !_hasLanded)
+        {
+            transform.position = ComputeGroundedLandingPoint(transform.position) + Vector3.up * hoverHeight;
+        }
+    }
     public void Init(ItemDefinition def, int stack)
     {
         itemDefinition = def;
@@ -48,9 +62,9 @@ public class WorldItem : MonoBehaviour
     /// Plays a little jump+flip from "from" towards "to".
     /// We internally adjust "to" so the collider rests on the ground, even on slopes.
     /// </summary>
+
     public void PlaySpawnAnimation(Vector3 from, Vector3 to)
     {
-        // Disable physics while we drive the motion by script
         if (_rb)
         {
             _rb.isKinematic = true;
@@ -58,10 +72,7 @@ public class WorldItem : MonoBehaviour
             _rb.angularVelocity = Vector3.zero;
         }
 
-        // Recompute the *true* landing point:
-        // 1) raycast down to the ground
-        // 2) add collider half-height so the bottom touches the surface
-        Vector3 target = ComputeGroundedLandingPoint(to);
+        Vector3 target = ComputeGroundedLandingPoint(to) + Vector3.up * hoverHeight;
 
         transform.position = from;
         StartCoroutine(JumpRoutine(from, target));
@@ -69,21 +80,19 @@ public class WorldItem : MonoBehaviour
 
     private Vector3 ComputeGroundedLandingPoint(Vector3 rawTo)
     {
-        // Step 1 – find terrain/ground below the target point
         Vector3 groundPoint = rawTo;
         Ray downRay = new Ray(rawTo + Vector3.up * 2f, Vector3.down);
-        if (Physics.Raycast(downRay, out var groundHit, 5f, groundMask, QueryTriggerInteraction.Ignore))
+
+        if (Physics.Raycast(downRay, out var groundHit, 20f, groundMask, QueryTriggerInteraction.Ignore))
         {
             groundPoint = groundHit.point;
         }
 
-        // Step 2 – offset by collider bottom distance so it rests on the surface
         return groundPoint + Vector3.up * _bottomOffset;
     }
 
     private IEnumerator JumpRoutine(Vector3 from, Vector3 to)
     {
-        // Prefab’s pose is our “resting on the ground” orientation
         Quaternion restRot = transform.rotation;
 
         float t = 0f;
@@ -92,27 +101,22 @@ public class WorldItem : MonoBehaviour
             t += Time.deltaTime / Mathf.Max(0.01f, jumpDuration);
             float clampedT = Mathf.Clamp01(t);
 
-            // simple 0→1→0 parabola
             float arc = 4f * clampedT * (1f - clampedT);
 
-            // move along the arc
             Vector3 pos = Vector3.Lerp(from, to, clampedT);
             pos.y += arc * jumpHeight;
             transform.position = pos;
 
-            // one flip in the air (feels ARPG-ish)
             float flipAngle = clampedT * 360f;
             transform.rotation = restRot * Quaternion.AngleAxis(flipAngle, Vector3.up);
 
             yield return null;
         }
 
-        // Final landing – snap to exact target, in prefab’s resting pose
         transform.position = to;
         transform.rotation = restRot;
         _hasLanded = true;
 
-        // Re-enable physics but without an extra bounce
         if (_rb)
         {
             _rb.isKinematic = false;
@@ -126,7 +130,6 @@ public class WorldItem : MonoBehaviour
         var col = GetComponent<Collider>();
         if (col == null) return 0f;
 
-        // Distance from pivot Y to collider bottom in world space (using resting pose).
         float bottom = col.bounds.min.y;
         float pivotY = transform.position.y;
         return Mathf.Max(0f, pivotY - bottom);
