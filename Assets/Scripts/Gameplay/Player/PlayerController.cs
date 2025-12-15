@@ -163,6 +163,9 @@ public class PlayerController : MonoBehaviour
     // Hover selection
     private EnemyTargetInteractable hoveredEnemy;
 
+    // Pending interaction target (e.g., pickup) for click-to-move approach
+    private IInteractable pendingInteractable;
+
     // --- Combat / animation (visual) ---
     private bool isInCombat;
     private enum WeaponStance { Unarmed, OneHand, OneHandShield, TwoHand, DualWield }
@@ -228,14 +231,24 @@ public class PlayerController : MonoBehaviour
             Ray ray = cam.ScreenPointToRay(mouseScreenPos);
 
             // We raycast against everything and then decide what it means.
-            if (Physics.Raycast(ray, out RaycastHit hit, faceMouseMaxDistance, ~0, QueryTriggerInteraction.Ignore))
+            var hits = Physics.RaycastAll(ray, faceMouseMaxDistance, ~0, QueryTriggerInteraction.Collide);
+            if (hits != null && hits.Length > 0)
             {
-                // 1) Did we click something damageable?
-                IDamageable dmg = hit.collider.GetComponentInParent<IDamageable>();
-                if (dmg != null && !IsTargetDead(dmg))
+                var orderedHits = hits.OrderBy(h => h.distance).ToArray();
+
+                // Prefer a damageable target first
+                var dmgHit = orderedHits.FirstOrDefault(h =>
                 {
-                    // NEW: if it’s an enemy, fire the selection event
-                    var enemyInteractable = hit.collider.GetComponentInParent<EnemyTargetInteractable>();
+                    var dmgComp = h.collider.GetComponentInParent<IDamageable>();
+                    return dmgComp != null && !IsTargetDead(dmgComp);
+                });
+
+                if (dmgHit.collider != null)
+                {
+                    var dmg = dmgHit.collider.GetComponentInParent<IDamageable>();
+
+                    // Fire selection event for enemies
+                    var enemyInteractable = dmgHit.collider.GetComponentInParent<EnemyTargetInteractable>();
                     if (enemyInteractable != null)
                     {
                         enemyInteractable.Interact(gameObject); // shows TargetInfoUI
@@ -245,50 +258,111 @@ public class PlayerController : MonoBehaviour
                         return; // ignore spam on same target while swing is locked
 
                     pendingAttackTarget = dmg;
-                    pendingAttackHitPoint = hit.point;
+                    pendingAttackHitPoint = dmgHit.point;
                     autoAttackOnArrival = true;
 
-                    // Move towards the clicked point on the XZ plane
-                    Vector3 dest = hit.point;
+                    Vector3 dest = dmgHit.point;
                     dest.y = transform.position.y;
 
                     clickTargetWorld = dest;
                     hasClickTarget = true;
                 }
-                // 2) Otherwise, is this valid ground? -> normal move click.
-                else if (((1 << hit.collider.gameObject.layer) & groundMask) != 0)
-                {
-                    clickTargetWorld = hit.point;
-                    hasClickTarget = true;
-
-                    autoAttackOnArrival = false;
-                    pendingAttackTarget = null;
-
-                    // NEW: clear current enemy selection when we click ground
-                    EnemyTargetInteractable.ClearSelection();
-
-                    // Ground click stops any running attack loop AND cancels attack anim.
-                    CancelCurrentAttack(resetCombatPose: false);
-                }
-                // 3) Fallback: we hit something else (e.g. pickup collider). Try to find ground behind it.
                 else
                 {
-                    bool hitInteractable = hit.collider.GetComponentInParent<IInteractable>() != null ||
-                                           hit.collider.gameObject.layer == LayerMask.NameToLayer("Interactable");
+                    // Next, look for the closest interactable
+                    var interactHit = orderedHits.FirstOrDefault(h =>
+                        h.collider.GetComponentInParent<IInteractable>() != null ||
+                        h.collider.gameObject.layer == LayerMask.NameToLayer("Interactable"));
 
-                    // 3) Fallback: if the only thing we hit is an interactable (e.g. pickup collider),
-                    // raycast again just against ground so click-to-move still works around pickups.
-                    if (hitInteractable &&
-                        Physics.Raycast(ray, out RaycastHit groundHit, faceMouseMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
+                    if (interactHit.collider != null)
                     {
-                        clickTargetWorld = groundHit.point;
-                        hasClickTarget = true;
+                        var interactable = interactHit.collider.GetComponentInParent<IInteractable>();
+                        Vector3 playerPos = transform.position;
+                        Vector3 targetPos = interactable != null ? interactable.Transform.position : interactHit.point;
 
-                        autoAttackOnArrival = false;
-                        pendingAttackTarget = null;
+                        if (interactable != null)
+                        {
+                            Vector3 flatTo = playerPos - targetPos;
+                            flatTo.y = 0f;
+                            float dist = flatTo.magnitude;
+                            if (dist <= interactable.MaxUseDistance)
+                            {
+                                interactable.Interact(gameObject);
+                                autoAttackOnArrival = false;
+                                pendingAttackTarget = null;
+                                pendingInteractable = null;
+                                hasClickTarget = false;
+                                return;
+                            }
 
-                        EnemyTargetInteractable.ClearSelection();
-                        CancelCurrentAttack(resetCombatPose: false);
+                            Vector3 dir = flatTo.sqrMagnitude > 0.0001f ? flatTo.normalized : transform.forward; // dir from target toward player
+                            float stopRadius = Mathf.Max(0.05f, interactable.MaxUseDistance - 0.05f);
+                            Vector3 dest = targetPos + dir * stopRadius;
+                            dest.y = playerPos.y;
+
+                            clickTargetWorld = dest;
+                            hasClickTarget = true;
+
+                            autoAttackOnArrival = false;
+                            pendingAttackTarget = null;
+                            pendingInteractable = interactable;
+
+                            EnemyTargetInteractable.ClearSelection();
+                            CancelCurrentAttack(resetCombatPose: false);
+                        }
+                        else
+                        {
+                            // Interactable layer without component: move near the hit point (ground-adjusted)
+                            if (Physics.Raycast(ray, out RaycastHit groundHit, faceMouseMaxDistance, groundMask, QueryTriggerInteraction.Ignore))
+                            {
+                                clickTargetWorld = groundHit.point;
+                                hasClickTarget = true;
+                            }
+                            else
+                            {
+                                clickTargetWorld = interactHit.point;
+                                hasClickTarget = true;
+                            }
+
+                            autoAttackOnArrival = false;
+                            pendingAttackTarget = null;
+                            pendingInteractable = null;
+
+                            EnemyTargetInteractable.ClearSelection();
+                            CancelCurrentAttack(resetCombatPose: false);
+                        }
+                    }
+                    else
+                    {
+                        // Finally, pick the closest ground hit
+                        var groundHit = orderedHits.FirstOrDefault(h => ((1 << h.collider.gameObject.layer) & groundMask) != 0);
+
+                        if (groundHit.collider != null)
+                        {
+                            clickTargetWorld = groundHit.point;
+                            hasClickTarget = true;
+
+                            autoAttackOnArrival = false;
+                            pendingAttackTarget = null;
+                            pendingInteractable = null;
+
+                            EnemyTargetInteractable.ClearSelection();
+                            CancelCurrentAttack(resetCombatPose: false);
+                        }
+                        else
+                        {
+                            // Fallback: use first hit
+                            var first = orderedHits[0];
+                            clickTargetWorld = first.point;
+                            hasClickTarget = true;
+
+                            autoAttackOnArrival = false;
+                            pendingAttackTarget = null;
+                            pendingInteractable = null;
+
+                            EnemyTargetInteractable.ClearSelection();
+                            CancelCurrentAttack(resetCombatPose: false);
+                        }
                     }
                 }
             }
@@ -333,11 +407,59 @@ public class PlayerController : MonoBehaviour
         // ===== CLICK-TO-MOVE (with optional auto-attack on arrival) =====
         if (hasClickTarget)
         {
+            // Interaction arrival check
+            if (pendingInteractable != null)
+            {
+                var comp = pendingInteractable as Component;
+                bool valid = comp != null && comp.gameObject.activeInHierarchy;
+
+                if (!valid)
+                {
+                    pendingInteractable = null;
+                    hasClickTarget = false;
+                }
+                else
+                {
+                    Vector3 flatTo = comp.transform.position - transform.position;
+                    flatTo.y = 0f;
+                    float distToInteractable = flatTo.magnitude;
+
+                    if (distToInteractable <= pendingInteractable.MaxUseDistance)
+                    {
+                        pendingInteractable.Interact(gameObject);
+                        pendingInteractable = null;
+                        hasClickTarget = false;
+                        motion = Vector3.zero;
+                    }
+                    else
+                    {
+                        // Recompute the desired stop point on the interact radius edge each frame.
+                        float stopRadius = Mathf.Max(0.05f, pendingInteractable.MaxUseDistance - 0.05f);
+                        // direction from target toward player (so we stop outside the target)
+                        Vector3 dir = (transform.position - comp.transform.position);
+                        dir.y = 0f;
+                        if (dir.sqrMagnitude < 0.0001f)
+                        {
+                            dir = transform.forward;
+                        }
+                        else
+                        {
+                            dir = dir.normalized;
+                        }
+
+                        Vector3 dest = comp.transform.position + dir * stopRadius;
+                        dest.y = transform.position.y;
+                        clickTargetWorld = dest;
+                    }
+                }
+            }
+
             if (autoAttackOnArrival && pendingAttackTarget != null && IsTargetDead(pendingAttackTarget))
             {
                 hasClickTarget = false;
                 autoAttackOnArrival = false;
                 pendingAttackTarget = null;
+                pendingInteractable = null;
                 motion = Vector3.zero;
             }
             else
@@ -348,6 +470,8 @@ public class PlayerController : MonoBehaviour
                 float dist = toTarget.magnitude;
 
                 bool hasPendingAttack = autoAttackOnArrival && pendingAttackTarget != null && !IsTargetDead(pendingAttackTarget);
+
+                bool hasPendingInteract = pendingInteractable != null;
 
                 if (hasPendingAttack && dist <= attackRange * 0.9f)
                 {
@@ -371,12 +495,13 @@ public class PlayerController : MonoBehaviour
 
                     motion = Vector3.zero;
                 }
-                else if (dist <= stopDistance || IsTargetDead(pendingAttackTarget))
+                else if (dist <= (hasPendingInteract ? 0.01f : stopDistance) || IsTargetDead(pendingAttackTarget))
                 {
                     hasClickTarget = false;
                     motion = Vector3.zero;
                     autoAttackOnArrival = false;
                     pendingAttackTarget = null;
+                    pendingInteractable = null;
                 }
                 else
                 {
@@ -400,7 +525,8 @@ public class PlayerController : MonoBehaviour
 
                     desiredDir = toTarget / Mathf.Max(dist, 0.0001f);
                     float maxStep = effectiveMoveSpeed * Time.deltaTime;
-                    float targetStep = Mathf.Max(0f, dist - stopDistance);
+                    float effectiveStop = hasPendingInteract ? 0.01f : stopDistance;
+                    float targetStep = Mathf.Max(0f, dist - effectiveStop);
                     float step = Mathf.Min(maxStep, targetStep);
                     motion = desiredDir * (step / Mathf.Max(Time.deltaTime, 0.0001f));
                 }

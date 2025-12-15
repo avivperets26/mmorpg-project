@@ -113,7 +113,7 @@ public class EquipmentController : MonoBehaviour
             var right = GetEquipped(EquipmentSlot.RightHand) as EquipmentItemDefinition;
             if (right != null && EquipmentSlotMapper.IsTwoHanded(right.grip)) return false;
 
-            return EquipIntoSlot(EquipmentSlot.LeftHand, def);
+            return EquipIntoSlotNoInventory(EquipmentSlot.LeftHand, def);
         }
 
         // Map slot(s)
@@ -125,7 +125,7 @@ public class EquipmentController : MonoBehaviour
         {
             if (GetEquipped(EquipmentSlot.RightHand) != null) return false;
             if (GetEquipped(EquipmentSlot.LeftHand) != null) return false;
-            return EquipIntoSlot(EquipmentSlot.RightHand, def);
+            return EquipIntoSlotNoInventory(EquipmentSlot.RightHand, def);
         }
 
         // One-handers or off-hand only: require a free compatible hand.
@@ -138,13 +138,13 @@ public class EquipmentController : MonoBehaviour
                 var alt = primary == EquipmentSlot.RightHand ? EquipmentSlot.LeftHand : EquipmentSlot.RightHand;
 
                 if (GetEquipped(primary) == null)
-                    return EquipIntoSlot(primary, def);
+                    return EquipIntoSlotNoInventory(primary, def);
 
                 if (secondary != default && secondary == alt && GetEquipped(alt) == null)
-                    return EquipIntoSlot(alt, def);
+                    return EquipIntoSlotNoInventory(alt, def);
 
                 if (GetEquipped(alt) == null && (secondary == alt || def.grip == WeaponGrip.OneHanded))
-                    return EquipIntoSlot(alt, def);
+                    return EquipIntoSlotNoInventory(alt, def);
 
                 return false;
             }
@@ -153,19 +153,50 @@ public class EquipmentController : MonoBehaviour
             if (secondary is EquipmentSlot.RightHand or EquipmentSlot.LeftHand)
             {
                 if (GetEquipped(secondary) == null)
-                    return EquipIntoSlot(secondary, def);
+                    return EquipIntoSlotNoInventory(secondary, def);
                 return false;
             }
         }
 
         // All other slots: require empty slot (primary first, else secondary if provided).
         if (GetEquipped(primary) == null)
-            return EquipIntoSlot(primary, def);
+            return EquipIntoSlotNoInventory(primary, def);
 
         if (secondary != default && GetEquipped(secondary) == null)
-            return EquipIntoSlot(secondary, def);
+            return EquipIntoSlotNoInventory(secondary, def);
 
         return false;
+    }
+
+    /// <summary>
+    /// Equip without pushing the previous item to inventory (used by pickup auto-equip).
+    /// Fails if the slot is occupied.
+    /// </summary>
+    private bool EquipIntoSlotNoInventory(EquipmentSlot slot, ItemDefinition def)
+    {
+        if (def == null) return false;
+
+        var current = _equipped.TryGetValue(slot, out var c) ? c : null;
+        if (current != null) return false;
+
+        _equipped[slot] = def;
+
+        // Update the specific slot immediately
+        GetSlotUI(slot)?.ShowItem(def);
+
+        visuals?.OnEquipped(slot, def as IHasItemVisual);
+
+        ApplyStatsOnEquip(def);
+
+        Debug.Log($"[Equip] Auto-equipped {def.displayName} into {slot} (pickup).");
+
+        if (preview) preview.SendMessage("RefreshNow", SendMessageOptions.DontRequireReceiver);
+
+        UpdateHasShieldFlag();
+        RaiseEquippedChanged();
+        RefreshUI();
+        DumpEquipped();
+        return true;
     }
 
     public bool TryEquip(ItemDefinition def, bool fromInventory = false)

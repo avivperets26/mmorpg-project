@@ -19,6 +19,8 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
     public Transform Transform => transform;
     public float MaxUseDistance => pickupRadius;
 
+    private bool _consumed; // prevents double pickup if multiple interact calls happen in the same frame
+
     void Reset()
     {
         var col = GetComponent<Collider>();
@@ -43,6 +45,8 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
 
     public void Interact(GameObject interactor)
     {
+        if (_consumed) return;
+
         if (!def)
         {
             Debug.LogWarning("[Pickup] Missing ItemDefinition!");
@@ -87,6 +91,7 @@ public class ItemWorldPickup : MonoBehaviour, IInteractable
         bool added = equipped || (inv != null && inv.TryAdd(def));
         if (added)
         {
+            _consumed = true;
             Destroy(gameObject);
         }
         else
