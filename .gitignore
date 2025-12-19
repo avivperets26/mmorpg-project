@@ -38,6 +38,9 @@ Assets/TerrainDemoScene_URP.meta
 # Ignore Dissolve FX package
 Assets/INab Studio/
 
+# Local-only Sine VFX assets
+Assets/SineVFX
+
 # Local-only item assets
 Assets/Items/Fantasy Medieval Potions
 
