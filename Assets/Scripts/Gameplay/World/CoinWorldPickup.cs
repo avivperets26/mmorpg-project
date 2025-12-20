@@ -36,6 +36,15 @@ public class CoinWorldPickup : MonoBehaviour, IInteractable
 
         RollOnce();
     }
+    public void SetRange(int min, int max)
+    {
+        minGold = Mathf.Max(0, min);
+        maxGold = Mathf.Max(minGold, max);
+
+        // Force re-roll with the new range
+        _rolled = false;
+        RollOnce();
+    }
 
     private void RollOnce()
     {

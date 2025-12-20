@@ -6,7 +6,7 @@ using UnityEngine;
 public class PlayerWallet : MonoBehaviour
 {
     [Header("Coins")]
-    [Min(0)] [SerializeField] private int coins;
+    [Min(0)][SerializeField] private int coins;
 
     public int Coins => coins;
 
