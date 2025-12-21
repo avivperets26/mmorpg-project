@@ -1,5 +1,6 @@
 // Assets\Scripts\Enemies\Runtime\EnemyLootOnDeath.cs
 using UnityEngine;
+using Game.VFX;
 
 namespace Game.Enemies
 {
@@ -8,6 +9,20 @@ namespace Game.Enemies
     {
         [Header("Loot Profile")]
         public EnemyDropTable dropTable;
+
+        [Header("VFX")]
+        [Tooltip("Optional one-shot VFX played when coins drop (e.g. VFX_CoinBurst_Base).")]
+        public GameObject coinBurstVfxPrefab;
+
+        [Tooltip("Failsafe destroy time for the VFX in case Stop Action isn't set to Destroy.")]
+        [Min(0.1f)]
+        public float coinBurstVfxDestroyAfter = 2.0f;
+
+        [Tooltip("If true, the VFX will align to the ground normal under the spawn point.")]
+        public bool alignCoinBurstToGround = true;
+
+        [Tooltip("Optional coin splash VFX spawner. If set, it controls splash + delayed pile spawn.")]
+        [SerializeField] private CoinSplashVFXSpawner coinSplashVfxSpawner;
 
         [Header("Spawn")]
         public float spawnHeight = 0.25f;
@@ -22,6 +37,9 @@ namespace Game.Enemies
         {
             _health = GetComponent<EnemyHealth>();
             if (_health != null) _health.OnDeath += HandleDeath;
+
+            if (!coinSplashVfxSpawner)
+                coinSplashVfxSpawner = GetComponent<CoinSplashVFXSpawner>();
         }
 
         void OnDestroy()
@@ -41,10 +59,8 @@ namespace Game.Enemies
         {
             if (dropTable.coinTiers == null || dropTable.coinTiers.Count == 0) return;
 
-            // ✅ Roll gold amount based on enemy budget (lvl 1–3 mushroom = 1–9)
             int gold = dropTable.RollGoldAmount();
 
-            // ✅ Choose visual tier that represents this amount
             var tier = dropTable.PickTierForGold(gold);
             if (tier == null || tier.prefab == null)
             {
@@ -53,21 +69,74 @@ namespace Game.Enemies
             }
 
             Vector3 pos = GetSpawnPos();
-            var go = Instantiate(tier.prefab, pos, Quaternion.identity);
 
-            // ✅ Force exact amount so visuals match your rolled budget
-            var coinPickup = go.GetComponent<CoinWorldPickup>();
-            if (coinPickup != null)
+            if (coinSplashVfxSpawner != null)
             {
-                coinPickup.SetRange(gold, gold);
+                coinSplashVfxSpawner.PlaySplashAndSpawnPile(
+                    pos,
+                    tier.prefab,
+                    null,
+                    go =>
+                    {
+                        var coinPickup = go.GetComponent<CoinWorldPickup>();
+                        if (coinPickup != null)
+                            coinPickup.SetRange(gold, gold);
+                        else if (enableLogs)
+                            Debug.LogWarning($"[Loot] Coin prefab '{tier.prefab.name}' missing CoinWorldPickup on root.", go);
+
+                        if (enableLogs) Debug.Log($"[Loot] Dropped {gold} gold at {pos}", this);
+                    });
             }
             else
             {
-                if (enableLogs)
-                    Debug.LogWarning($"[Loot] Coin prefab '{tier.prefab.name}' is missing CoinWorldPickup on root.", go);
+                // Fallback to legacy behavior if no spawner is assigned.
+                if (coinBurstVfxPrefab != null)
+                    SpawnCoinBurstVfx(pos);
+
+                StartCoroutine(SpawnCoinAfterDelay(tier.prefab, pos, gold, 0.12f));
+            }
+        }
+
+        private System.Collections.IEnumerator SpawnCoinAfterDelay(GameObject coinPrefab, Vector3 pos, int gold, float delay)
+        {
+            yield return new WaitForSeconds(delay);
+
+            var go = Instantiate(coinPrefab, pos, Quaternion.identity);
+
+            var coinPickup = go.GetComponent<CoinWorldPickup>();
+            if (coinPickup != null)
+                coinPickup.SetRange(gold, gold);
+            else if (enableLogs)
+                Debug.LogWarning($"[Loot] Coin prefab '{coinPrefab.name}' missing CoinWorldPickup on root.", go);
+
+            if (enableLogs) Debug.Log($"[Loot] Dropped {gold} gold at {pos}", this);
+        }
+
+        private void SpawnCoinBurstVfx(Vector3 pos)
+        {
+            if (!coinBurstVfxPrefab) return;
+
+            Quaternion rot = Quaternion.identity;
+
+            // Optional: align VFX to ground so it "sits" on slopes nicely.
+            if (alignCoinBurstToGround)
+            {
+                // Raycast a bit above the spawn pos downward
+                Vector3 origin = pos + Vector3.up * 0.5f;
+                if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 3f, ~0, QueryTriggerInteraction.Ignore))
+                {
+                    // Align "up" to ground normal
+                    rot = Quaternion.FromToRotation(Vector3.up, hit.normal);
+                }
             }
 
-            if (enableLogs) Debug.Log($"[Loot] Dropped {gold} gold using tier '{tier.name}'", this);
+            var vfx = Instantiate(coinBurstVfxPrefab, pos, rot);
+
+            // Failsafe cleanup (in case the prefab doesn't Destroy itself via Stop Action)
+            if (coinBurstVfxDestroyAfter > 0f)
+            {
+                Destroy(vfx, coinBurstVfxDestroyAfter);
+            }
         }
 
         private void DropItems()
@@ -100,7 +169,12 @@ namespace Game.Enemies
                 pos += new Vector3(r.x, 0f, r.y);
             }
 
+            Vector3 origin = pos + Vector3.up * 1.5f;
+            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 10f, ~0, QueryTriggerInteraction.Ignore))
+                pos = hit.point;
+
             return pos;
         }
     }
 }
+
