@@ -28,6 +28,12 @@ namespace Game.Enemies
         public float spawnHeight = 0.25f;
         public float scatterRadius = 0.4f;
 
+        [Header("Ground Snap")]
+        public LayerMask groundMask = ~0;
+        public float groundSnapDistance = 10f;
+        public float groundSnapRaycastHeight = 1.5f;
+        public bool groundSnapUseTriggers = false;
+
         [Header("Debug")]
         public bool enableLogs = false;
 
@@ -40,6 +46,9 @@ namespace Game.Enemies
 
             if (!coinSplashVfxSpawner)
                 coinSplashVfxSpawner = GetComponent<CoinSplashVFXSpawner>();
+
+            if (!coinSplashVfxSpawner)
+                coinSplashVfxSpawner = GetComponentInChildren<CoinSplashVFXSpawner>(true);
         }
 
         void OnDestroy()
@@ -169,11 +178,40 @@ namespace Game.Enemies
                 pos += new Vector3(r.x, 0f, r.y);
             }
 
-            Vector3 origin = pos + Vector3.up * 1.5f;
-            if (Physics.Raycast(origin, Vector3.down, out RaycastHit hit, 10f, ~0, QueryTriggerInteraction.Ignore))
+            Vector3 origin = pos + Vector3.up * groundSnapRaycastHeight;
+            var triggerMode = groundSnapUseTriggers ? QueryTriggerInteraction.Collide : QueryTriggerInteraction.Ignore;
+            float maxDistance = Mathf.Max(groundSnapDistance, 0.1f);
+            if (TryGetGroundHit(origin, maxDistance, groundMask, triggerMode, out RaycastHit hit))
                 pos = hit.point;
 
             return pos;
+        }
+
+        private bool TryGetGroundHit(
+            Vector3 origin,
+            float maxDistance,
+            LayerMask mask,
+            QueryTriggerInteraction triggerMode,
+            out RaycastHit bestHit)
+        {
+            bestHit = default;
+            bool found = false;
+            var hits = Physics.RaycastAll(origin, Vector3.down, maxDistance, mask, triggerMode);
+
+            for (int i = 0; i < hits.Length; i++)
+            {
+                var h = hits[i];
+                if (h.collider == null) continue;
+                if (h.collider.transform.IsChildOf(transform)) continue;
+
+                if (!found || h.distance < bestHit.distance)
+                {
+                    bestHit = h;
+                    found = true;
+                }
+            }
+
+            return found;
         }
     }
 }

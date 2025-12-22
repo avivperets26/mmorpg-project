@@ -23,6 +23,12 @@ namespace Game.VFX
         [Tooltip("Extra Y offset for the VFX spawn position.")]
         public float additionalYOffset = 0f;
 
+        [Tooltip("Extra Y offset for the coin pile spawn position (use negative to lower).")]
+        public float pileYOffset = 0f;
+
+        [Tooltip("If true, adjusts the spawned pile so its bottom touches the ground position.")]
+        public bool snapPileToGround = true;
+
         public void PlaySplashAndSpawnPile(Vector3 position, GameObject coinPilePrefab, Transform parent = null)
         {
             PlaySplashAndSpawnPile(position, coinPilePrefab, parent, null);
@@ -44,7 +50,9 @@ namespace Game.VFX
                 onPileSpawned,
                 splashPrefab,
                 delayBeforeSpawnPile,
-                additionalYOffset));
+                additionalYOffset,
+                pileYOffset,
+                snapPileToGround));
         }
 
         private static IEnumerator PlayRoutine(
@@ -55,7 +63,9 @@ namespace Game.VFX
             System.Action<GameObject> onPileSpawned,
             ParticleSystem splashPrefab,
             float delayBeforeSpawnPile,
-            float additionalYOffset)
+            float additionalYOffset,
+            float pileYOffset,
+            bool snapPileToGround)
         {
             Vector3 vfxPos = position + Vector3.up * additionalYOffset;
 
@@ -74,7 +84,10 @@ namespace Game.VFX
             if (delayBeforeSpawnPile > 0f)
                 yield return new WaitForSeconds(delayBeforeSpawnPile);
 
-            GameObject pile = Instantiate(coinPilePrefab, position, Quaternion.identity, parent);
+            Vector3 pilePos = position + Vector3.up * pileYOffset;
+            GameObject pile = Instantiate(coinPilePrefab, pilePos, Quaternion.identity, parent);
+            if (snapPileToGround)
+                SnapPileToGround(pile, position.y + pileYOffset);
             onPileSpawned?.Invoke(pile);
 
             if (host != null)
@@ -85,6 +98,26 @@ namespace Game.VFX
         {
             var go = new GameObject("CoinSplashVFXRunner");
             return go.AddComponent<CoroutineHost>();
+        }
+
+        private static void SnapPileToGround(GameObject pile, float targetGroundY)
+        {
+            if (pile == null) return;
+
+            var col = pile.GetComponentInChildren<Collider>();
+            if (col != null)
+            {
+                float delta = targetGroundY - col.bounds.min.y;
+                pile.transform.position += new Vector3(0f, delta, 0f);
+                return;
+            }
+
+            var rend = pile.GetComponentInChildren<Renderer>();
+            if (rend != null)
+            {
+                float delta = targetGroundY - rend.bounds.min.y;
+                pile.transform.position += new Vector3(0f, delta, 0f);
+            }
         }
 
         private static float GetSystemLifetime(ParticleSystem system)
