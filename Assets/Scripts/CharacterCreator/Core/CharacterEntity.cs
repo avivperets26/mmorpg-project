@@ -819,6 +819,13 @@ namespace Game.CharacterCreator
         /// </summary>
         public void CustomizeCharacter()
         {
+            if (CharacterManager.instance == null)
+                _ = CharacterDataSetting.instance;
+            if (CharacterManager.instance == null)
+            {
+                Debug.LogError("CharacterEntity: Missing CharacterManager; cannot open customizer.");
+                return;
+            }
             if (mCharacterAppearance == null) ResetCharacter();
             CharacterCusSetting _setting = new CharacterCusSetting()
             {
@@ -838,6 +845,13 @@ namespace Game.CharacterCreator
         /// </summary>
         public void CreateCharacter()
         {
+            if (CharacterManager.instance == null)
+                _ = CharacterDataSetting.instance;
+            if (CharacterManager.instance == null)
+            {
+                Debug.LogError("CharacterEntity: Missing CharacterManager; cannot create character.");
+                return;
+            }
             if (mCharacterAppearance == null) ResetCharacter();
             CharacterCusSetting _setting = new CharacterCusSetting()
             {
@@ -857,6 +871,13 @@ namespace Game.CharacterCreator
         /// </summary>
         public void CreateCharacterByDeveloper()
         {
+            if (CharacterManager.instance == null)
+                _ = CharacterDataSetting.instance;
+            if (CharacterManager.instance == null)
+            {
+                Debug.LogError("CharacterEntity: Missing CharacterManager; cannot create character.");
+                return;
+            }
             if (mCharacterAppearance == null) ResetCharacter();
             CharacterCusSetting _setting = new CharacterCusSetting()
             {

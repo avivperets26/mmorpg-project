@@ -391,7 +391,10 @@ namespace Game.CharacterCreator
         }
         private void CheckOutfits()
         {
-            for (int i = 0; i < OldOutfitID.Length; i++)
+            if (MyData == null || MyData._OutfitID == null || MyData._CusColor1 == null || MyData._CusColor2 == null || MyData._CusColor3 == null)
+                return;
+            var count = Mathf.Min(OldOutfitID.Length, MyData._OutfitID.Length, OldCusColor1.Length, MyData._CusColor1.Length, OldCusColor2.Length, MyData._CusColor2.Length, OldCusColor3.Length, MyData._CusColor3.Length);
+            for (int i = 0; i < count; i++)
             {
                 if (OldOutfitID[i] != MyData._OutfitID[i]) SwitchOutfit((OutfitSlots)i, MyData._OutfitID[i]);
                 if (OldCusColor1[i] != MyData._CusColor1[i] || OldCusColor2[i] != MyData._CusColor2[i] || OldCusColor3[i] != MyData._CusColor3[i]) SetOutfitColor((OutfitSlots)i);
@@ -492,7 +495,27 @@ namespace Game.CharacterCreator
             if (!InternalInited) InternalInit();
             foreach (AccessoryInfo setting in MyData._CharacterData.Sex == 0 ? CharacterDataSetting.instance.MaleAccessorySettings : CharacterDataSetting.instance.FemaleAccessorySettings)
             {
-                int _id = (int)setting.Slot>9? MyData._OutfitID[(int)setting.Slot-5] : MyData._CharacterData.DataInt[(int)setting.Slot];
+                int _id;
+                if ((int)setting.Slot > 9)
+                {
+                    var outfitIndex = (int)setting.Slot - 5;
+                    if (MyData._OutfitID == null || outfitIndex < 0 || outfitIndex >= MyData._OutfitID.Length)
+                    {
+                        Debug.LogWarning($"CharacterBoneControl: OutfitID index out of range for slot {setting.Slot}.");
+                        continue;
+                    }
+                    _id = MyData._OutfitID[outfitIndex];
+                }
+                else
+                {
+                    var dataIndex = (int)setting.Slot;
+                    if (MyData._CharacterData == null || MyData._CharacterData.DataInt == null || dataIndex < 0 || dataIndex >= MyData._CharacterData.DataInt.Length)
+                    {
+                        Debug.LogWarning($"CharacterBoneControl: DataInt index out of range for slot {setting.Slot}.");
+                        continue;
+                    }
+                    _id = MyData._CharacterData.DataInt[dataIndex];
+                }
                 bool _load = false;
                 if (AccessoryIDs.ContainsKey(setting.DisplayName))
                 {

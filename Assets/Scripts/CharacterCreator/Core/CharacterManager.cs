@@ -1,4 +1,4 @@
-using System.Collections;
+ï»¿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using System.IO;
@@ -174,7 +174,19 @@ namespace Game.CharacterCreator
         }
         private CharacterBoneControl NewPreviewCharacter(Sex _sex)
         {
-            return Instantiate(Resources.Load<GameObject>("CharacterCreator/Player/" + (_sex == Sex.Female ? "CharacterFemale" : "CharacterMale"))).GetComponent<CharacterBoneControl>();
+            var playerPath = "CharacterCreator/Player/" + (_sex == Sex.Female ? "CharacterFemale" : "CharacterMale");
+            var prefab = Resources.Load<GameObject>(playerPath);
+            if (prefab == null)
+            {
+                var corePath = "CharacterCreator/Core/" + (_sex == Sex.Female ? "CharacterFemale" : "CharacterMale");
+                prefab = Resources.Load<GameObject>(corePath);
+            }
+            if (prefab == null)
+            {
+                Debug.LogError($"CharacterManager: Missing preview prefab for sex '{_sex}'.");
+                return null;
+            }
+            return Instantiate(prefab).GetComponent<CharacterBoneControl>();
         }
 
         public static void SetPhotoMode(int _mode)
@@ -428,8 +440,8 @@ namespace Game.CharacterCreator
 
 
 
-        /// These functions allow you to manage preview characters, which is useful for displaying a character¡¯s current appearance within various UI interfaces 
-        /// (e.g., rendering the player¡¯s appearance to a RenderTexture for display in an equipment or customization interface)
+        /// These functions allow you to manage preview characters, which is useful for displaying a characterï¿½ï¿½s current appearance within various UI interfaces 
+        /// (e.g., rendering the playerï¿½ï¿½s appearance to a RenderTexture for display in an equipment or customization interface)
 
         /// <summary>
         /// Creates a preview character at a specified position and angle. The key is used to identify this character for further operations
