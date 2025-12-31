@@ -28,7 +28,7 @@ namespace Game.CharacterCreator
         [HideInInspector]
         public bool AutoInitializeWithDefaultLooking = false;
         [HideInInspector]
-        public WeaponController [] Weapons;
+        public WeaponController[] Weapons;
         [HideInInspector]
         public int WeaponEquipType = 0;
         [HideInInspector]
@@ -36,14 +36,16 @@ namespace Game.CharacterCreator
         [HideInInspector]
         public CharacterBoneControl mCharacterBoneControl;
 
+        [SerializeField] private string playerPrefabResourceRoot = "CharacterCreator/Player";
+
         private WeaponState CurrentWeaponState = WeaponState.Hide;
-       
+
         protected Animator mAnimator;
         public Transform LookAtTarget;
         public bool TogglePlaceHolderGizmo = true;
         public Mesh PlaceHolderMesh;
-        public Color PlaceHolderColor= new Color(0F, 0.7F, 1F, 0.5F);
-        private  Coroutine ResetCo;
+        public Color PlaceHolderColor = new Color(0F, 0.7F, 1F, 0.5F);
+        private Coroutine ResetCo;
         private Dictionary<WeaponType, WeaponController> EquippedWeapons = new Dictionary<WeaponType, WeaponController>();
         #endregion
 
@@ -112,13 +114,15 @@ namespace Game.CharacterCreator
         /// <summary>
         /// Returns the gender of this character
         /// </summary>
-        public Sex sex 
+        public Sex sex
         {
             get
             {
+                if (mCharacterAppearance == null) return Sex.Male; // safe default
                 return mCharacterAppearance._Sex;
             }
         }
+
 
         /// <summary>
         /// Assigns a random unique ID for this character.
@@ -130,7 +134,7 @@ namespace Game.CharacterCreator
             {
                 _bytes.Add((byte)Random.Range(63, 123));
             }
-            uid = System.Text.Encoding.ASCII.GetString(_bytes.ToArray()).Replace(@"\","").Replace("/","").Replace(".", "").Replace("^","").Replace("`", "").Replace("@","").Replace("(", "").Replace(")", "").Replace("?", "").Replace("[", "").Replace("]", "").Replace("-", "_");
+            uid = System.Text.Encoding.ASCII.GetString(_bytes.ToArray()).Replace(@"\", "").Replace("/", "").Replace(".", "").Replace("^", "").Replace("`", "").Replace("@", "").Replace("(", "").Replace(")", "").Replace("?", "").Replace("[", "").Replace("]", "").Replace("-", "_");
         }
 
 
@@ -149,7 +153,7 @@ namespace Game.CharacterCreator
         /// Initializes the character with a "*.bytes" file in your resources folder, please use relative path without extension from resources folder. Example: "CharacterCreator/CustomBlueprints/Characters/NpcPreset_1"
         /// </summary>
         /// <param name="_resourcePath"></param>
-        public void LoadFromResourceFile(string _resourcePath) 
+        public void LoadFromResourceFile(string _resourcePath)
         {
             Initialize(CharacterManager.LoadCharacterDataFromResources(_resourcePath, null));
         }
@@ -160,7 +164,7 @@ namespace Game.CharacterCreator
         /// <param name="_absolutePath"></param>
         public void LoadFromByteFileFromDisk(string _absolutePath)
         {
-            Initialize(CharacterManager.LoadCharacterDataFromFile(mCharacterAppearance,_absolutePath));
+            Initialize(CharacterManager.LoadCharacterDataFromFile(mCharacterAppearance, _absolutePath));
         }
 
         /// <summary>
@@ -211,7 +215,7 @@ namespace Game.CharacterCreator
         /// </summary>
         /// <param name="_filter"></param>
         /// <returns></returns>
-        public byte[] GetSaveBytes(BlurPrintType _filter= BlurPrintType.AllAppearance)
+        public byte[] GetSaveBytes(BlurPrintType _filter = BlurPrintType.AllAppearance)
         {
             return mCharacterAppearance.ToBytes(_filter);
         }
@@ -227,7 +231,21 @@ namespace Game.CharacterCreator
             mAnimator.avatar = null;
             if (mCharacterBoneControl != null) DestroyImmediate(mCharacterBoneControl.gameObject);
             mCharacterAppearance = _data;
-            mCharacterBoneControl = Instantiate(Resources.Load<GameObject>("CharacterCreator/Player/" + (sex == Sex.Female ? "CharacterFemale" : "CharacterMale")),transform).GetComponent<CharacterBoneControl>();
+            var prefabPath = $"{playerPrefabResourceRoot}/" + (sex == Sex.Female ? "CharacterFemale" : "CharacterMale");
+            var prefab = Resources.Load<GameObject>(prefabPath);
+            if (!prefab)
+            {
+                Debug.LogError($"CharacterEntity: Missing character prefab at Resources/{prefabPath}. " +
+                               $"Make sure the prefab exists under a Resources folder.");
+                return;
+            }
+
+            mCharacterBoneControl = Instantiate(prefab, transform).GetComponent<CharacterBoneControl>();
+            if (!mCharacterBoneControl)
+            {
+                Debug.LogError($"CharacterEntity: Prefab at Resources/{prefabPath} has no CharacterBoneControl component.");
+                return;
+            }
             mAnimator.runtimeAnimatorController = sex == Sex.Male ? MaleController : FemaleController;
             Avatar _avatar = mCharacterBoneControl.GetComponent<Animator>().avatar;
             DestroyImmediate(mCharacterBoneControl.GetComponent<Animator>());
@@ -265,7 +283,21 @@ namespace Game.CharacterCreator
             mAnimator.avatar = null;
             if (mCharacterBoneControl != null) Destroy(mCharacterBoneControl.gameObject);
             mCharacterAppearance = new CharacterAppearance(CharacterData.Create((byte)_sex));
-            mCharacterBoneControl = Instantiate(Resources.Load<GameObject>("CharacterCreator/Player/" + (sex == Sex.Female ? "CharacterFemale" : "CharacterMale")), transform).GetComponent<CharacterBoneControl>();
+            var prefabPath = $"{playerPrefabResourceRoot}/" + (sex == Sex.Female ? "CharacterFemale" : "CharacterMale");
+            var prefab = Resources.Load<GameObject>(prefabPath);
+            if (!prefab)
+            {
+                Debug.LogError($"CharacterEntity: Missing character prefab at Resources/{prefabPath}. " +
+                               $"Make sure the prefab exists under a Resources folder.");
+                return;
+            }
+
+            mCharacterBoneControl = Instantiate(prefab, transform).GetComponent<CharacterBoneControl>();
+            if (!mCharacterBoneControl)
+            {
+                Debug.LogError($"CharacterEntity: Prefab at Resources/{prefabPath} has no CharacterBoneControl component.");
+                return;
+            }
             mAnimator.runtimeAnimatorController = sex == Sex.Male ? MaleController : FemaleController;
             Avatar _avatar = mCharacterBoneControl.GetComponent<Animator>().avatar;
             DestroyImmediate(mCharacterBoneControl.GetComponent<Animator>());
@@ -290,8 +322,9 @@ namespace Game.CharacterCreator
         public void LoadDefaultWeapon()
         {
             UnequipAllWeapons();
-            for (int i=0;i< Weapons.Length;i++) {
-                if(Weapons[i] != null) EquipWeapon(Weapons[i], DefaultWeaponState);
+            for (int i = 0; i < Weapons.Length; i++)
+            {
+                if (Weapons[i] != null) EquipWeapon(Weapons[i], DefaultWeaponState);
             }
         }
 
@@ -300,9 +333,10 @@ namespace Game.CharacterCreator
         /// </summary>
         /// <param name="_weapon"></param>
         /// <param name="_state"></param>
-        public void EquipWeapon(WeaponController _weapon, WeaponState _state= WeaponState.Carry)
+        public void EquipWeapon(WeaponController _weapon, WeaponState _state = WeaponState.Carry)
         {
-            if (mCharacterBoneControl == null) {
+            if (mCharacterBoneControl == null)
+            {
                 Debug.LogError("Trying to load the weapon when the character is not ready.");
                 return;
             }
@@ -310,34 +344,38 @@ namespace Game.CharacterCreator
             {
                 if (EquippedWeapons.ContainsKey(_weapon.Type)) UnequipWeapon(_weapon.Type);
             }
-            else{
+            else
+            {
                 if (_weapon.Type == WeaponType.TwoHanded)
                 {
                     if (EquippedWeapons.ContainsKey(WeaponType.LeftHand)) UnequipWeapon(WeaponType.LeftHand);
                     if (EquippedWeapons.ContainsKey(WeaponType.RightHand)) UnequipWeapon(WeaponType.RightHand);
                 }
-                if ((_weapon.Type== WeaponType.LeftHand || _weapon.Type == WeaponType.RightHand || _weapon.Type == WeaponType.TwoHanded) &&  EquippedWeapons.ContainsKey(WeaponType.TwoHanded)) UnequipWeapon(WeaponType.TwoHanded);
+                if ((_weapon.Type == WeaponType.LeftHand || _weapon.Type == WeaponType.RightHand || _weapon.Type == WeaponType.TwoHanded) && EquippedWeapons.ContainsKey(WeaponType.TwoHanded)) UnequipWeapon(WeaponType.TwoHanded);
                 if (EquippedWeapons.ContainsKey(_weapon.Type)) UnequipWeapon(_weapon.Type);
             }
-            Transform _parent=null;
+            Transform _parent = null;
             string _parentBoneName = "";
             int _stateId = 0;
             int _sexId = (int)mCharacterAppearance._Sex;
             if (_weapon.Data.VisibleWhenCarry && _state == WeaponState.Carry)
             {
-                _parentBoneName= _weapon.Data.CarryParentTransform;
+                _parentBoneName = _weapon.Data.CarryParentTransform;
                 _stateId = 1;
-            } else {
+            }
+            else
+            {
                 _parentBoneName = _weapon.Data.HoldParentTransform;
                 _stateId = 0;
             }
-            if (_parentBoneName != "" && mCharacterBoneControl.BoneDictionary.ContainsKey(_parentBoneName)) {
+            if (_parentBoneName != "" && mCharacterBoneControl.BoneDictionary.ContainsKey(_parentBoneName))
+            {
                 _parent = mCharacterBoneControl.BoneDictionary[_parentBoneName];
             }
             if (_parent != null)
             {
                 GameObject _newWeapon = Instantiate(_weapon.gameObject, _parent);
-                _newWeapon.transform.localPosition = _weapon.Data.Pos[_sexId*2+_stateId];
+                _newWeapon.transform.localPosition = _weapon.Data.Pos[_sexId * 2 + _stateId];
                 _newWeapon.transform.localEulerAngles = _weapon.Data.Rot[_sexId * 2 + _stateId];
                 _newWeapon.transform.localScale = _weapon.Data.Scale[_sexId * 2 + _stateId];
                 _newWeapon.gameObject.SetActive(_state != WeaponState.Hide);
@@ -347,7 +385,7 @@ namespace Game.CharacterCreator
             }
             else
             {
-                Debug.LogError("Can not find parent bone ["+ _parentBoneName+"] for "+ _weapon.gameObject.name);
+                Debug.LogError("Can not find parent bone [" + _parentBoneName + "] for " + _weapon.gameObject.name);
             }
         }
 
@@ -359,7 +397,7 @@ namespace Game.CharacterCreator
         {
             if (EquippedWeapons.ContainsKey(_slot))
             {
-                if (EquippedWeapons[_slot] != null)EquippedWeapons[_slot].Unequip();
+                if (EquippedWeapons[_slot] != null) EquippedWeapons[_slot].Unequip();
                 EquippedWeapons.Remove(_slot);
             }
         }
@@ -383,11 +421,15 @@ namespace Game.CharacterCreator
         /// <param name="_slot"></param>
         public void SwitchWeaponState(WeaponState _state, WeaponType _slot)
         {
-            if (EquippedWeapons.ContainsKey(_slot)) {
-                if (_state == WeaponState.Hide) {
+            if (EquippedWeapons.ContainsKey(_slot))
+            {
+                if (_state == WeaponState.Hide)
+                {
                     EquippedWeapons[_slot].gameObject.SetActive(false);
-                    EquippedWeapons[_slot].SetSheath(false,this);
-                } else {
+                    EquippedWeapons[_slot].SetSheath(false, this);
+                }
+                else
+                {
                     Transform _parent = null;
                     string _parentBoneName = "";
                     int _stateId = 0;
@@ -411,14 +453,14 @@ namespace Game.CharacterCreator
                         _stateId = 0;
                     }
 
-                    if (_parentBoneName!="" && mCharacterBoneControl.BoneDictionary.ContainsKey(_parentBoneName))
+                    if (_parentBoneName != "" && mCharacterBoneControl.BoneDictionary.ContainsKey(_parentBoneName))
                     {
                         _parent = mCharacterBoneControl.BoneDictionary[_parentBoneName];
                     }
 
                     if (_parent != null)
                     {
-                        EquippedWeapons[_slot].transform.SetParent( _parent);
+                        EquippedWeapons[_slot].transform.SetParent(_parent);
                         EquippedWeapons[_slot].transform.localPosition = EquippedWeapons[_slot].Data.Pos[_sexId * 2 + _stateId];
                         EquippedWeapons[_slot].transform.localEulerAngles = EquippedWeapons[_slot].Data.Rot[_sexId * 2 + _stateId];
                         EquippedWeapons[_slot].transform.localScale = EquippedWeapons[_slot].Data.Scale[_sexId * 2 + _stateId];
@@ -488,7 +530,7 @@ namespace Game.CharacterCreator
         {
             foreach (var key in EquippedWeapons.Keys)
             {
-                if (EquippedWeapons[key] != null && EquippedWeapons[key].uid==_uid) return EquippedWeapons[key];
+                if (EquippedWeapons[key] != null && EquippedWeapons[key].uid == _uid) return EquippedWeapons[key];
             }
             return null;
         }
@@ -525,7 +567,7 @@ namespace Game.CharacterCreator
                 mCharacterAppearance._CusColor2[(int)_equipment.Type] = Uint8Color.Set(_equipment.CustomColor2);
                 mCharacterAppearance._CusColor3[(int)_equipment.Type] = Uint8Color.Set(_equipment.CustomColor3);
             }
-            else if((int)_equipment.Type<5)
+            else if ((int)_equipment.Type < 5)
             {
                 OutfitColorSetting _setting = CharacterDataSetting.instance.GetOutfitColorSetting(sex, _equipment.Type, mCharacterAppearance._OutfitID[(int)_equipment.Type]);
                 mCharacterAppearance._CusColor1[(int)_equipment.Type] = Uint8Color.Set(_setting.DefaultColor1);
@@ -571,7 +613,7 @@ namespace Game.CharacterCreator
         /// <param name="_color1"></param>
         /// <param name="_color2"></param>
         /// <param name="_color3"></param>
-        public void Equip(OutfitSlots _slot, int _id, Color _color1,Color _color2,Color _color3)
+        public void Equip(OutfitSlots _slot, int _id, Color _color1, Color _color2, Color _color3)
         {
             mCharacterAppearance._OutfitID[(int)_slot] = (byte)_id;
             mCharacterAppearance._CusColor1[(int)_slot] = Uint8Color.Set(_color1);
@@ -640,9 +682,9 @@ namespace Game.CharacterCreator
         /// <param name="_cameraAngle"></param>
         /// <param name="_cameraLight"></param>
         /// <returns></returns>
-        public Texture2D GetCharacterPhoto(Vector2 _imageSize, Color _bgColor, float _cameraAngle=0F,bool _cameraLight=true)
+        public Texture2D GetCharacterPhoto(Vector2 _imageSize, Color _bgColor, float _cameraAngle = 0F, bool _cameraLight = true)
         {
-            return PhotoHouse.TakePhoto(_imageSize,GetBoneByName("Bip001 Head"), _bgColor, _cameraAngle, _cameraLight);
+            return PhotoHouse.TakePhoto(_imageSize, GetBoneByName("Bip001 Head"), _bgColor, _cameraAngle, _cameraLight);
         }
 
         /// <summary>
@@ -710,13 +752,13 @@ namespace Game.CharacterCreator
         }
 
         /// <summary>
-        /// Sets the percentage of the character¡¯s eye openness. 1~100
+        /// Sets the percentage of the characterï¿½ï¿½s eye openness. 1~100
         /// </summary>
         /// <param name="_openPercentage"></param>
         public void SetEyeOpen(float _openPercentage)
         {
             if (mCharacterBoneControl == null) return;
-            mCharacterBoneControl.EyeOpen= _openPercentage;
+            mCharacterBoneControl.EyeOpen = _openPercentage;
         }
 
         /// <summary>
@@ -755,7 +797,7 @@ namespace Game.CharacterCreator
         {
             if (mCharacterBoneControl == null) return;
             LookAtTarget = _target;
-            mCharacterBoneControl.LookAtTarget= LookAtTarget;
+            mCharacterBoneControl.LookAtTarget = LookAtTarget;
         }
 
         #endregion
@@ -763,7 +805,7 @@ namespace Game.CharacterCreator
 
         #region Customization
         /// <summary>
-        /// Resets the character¡¯s appearance back to its default state.
+        /// Resets the characterï¿½ï¿½s appearance back to its default state.
         /// </summary>
         public void ResetCharacter()
         {
@@ -802,7 +844,7 @@ namespace Game.CharacterCreator
                 AllowCustomOutfit = CharacterManager.instance.AllowOutfitsWhenCreate,
                 AllowNameChange = true,
                 AllowSexSwitch = CharacterManager.instance.AllowChangeSexWhenCreate,
-                AllowRaceChange=true,
+                AllowRaceChange = true,
                 RaceSettingVisible = CharacterManager.instance.RaceSettingVisible,
                 BackCategoryVisible = CharacterManager.instance.BackCategoryVisible,
                 TailCategoryVisible = CharacterManager.instance.TailCategoryVisible
@@ -816,7 +858,7 @@ namespace Game.CharacterCreator
         public void CreateCharacterByDeveloper()
         {
             if (mCharacterAppearance == null) ResetCharacter();
-             CharacterCusSetting _setting = new CharacterCusSetting()
+            CharacterCusSetting _setting = new CharacterCusSetting()
             {
                 AllowCustomOutfit = true,
                 AllowNameChange = true,
@@ -825,7 +867,7 @@ namespace Game.CharacterCreator
                 RaceSettingVisible = true,
                 BackCategoryVisible = true,
                 TailCategoryVisible = true
-             };
+            };
 #if UNITY_EDITOR
             CharacterManager.StartCreation(this, Application.dataPath + EditorRootPath, SaveMethod.BytesFile, _setting, SceneManager.GetActiveScene());
 #else

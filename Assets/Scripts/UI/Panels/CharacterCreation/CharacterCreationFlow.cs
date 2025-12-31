@@ -1,7 +1,7 @@
 // Assets/Scripts/UI/Panels/CharacterCreation/CharacterCreationFlow.cs
 // Wiring:
 // - characterEntity: GameObject with CharacterEntity component (the MCC character instance).
-// - vendorCustomizationRoot: root GameObject for MCC UI (e.g., CanvasRoot/CharacterCustomization).
+// - customizationRoot: root GameObject for MCC UI (e.g., CanvasRoot/CharacterCustomization).
 // - frontPanelRoot: root GameObject for our front panel (e.g., CC_UI/FrontPanel).
 // - nameInput: TMP_InputField for the player name.
 // - createButton: Create button (OnClick -> CreateCharacter).
@@ -9,14 +9,14 @@
 // - mageButton: Mage button (OnClick -> SelectMage) [kept disabled].
 // - elfButton: Elf button (OnClick -> SelectElf) [kept disabled].
 // - Customize button (if present): OnClick -> OpenCustomizer.
-// - Vendor "Done" button: OnClick -> OnVendorDone.
+// - Customizer "Done" button: OnClick -> OnCustomizerDone.
 // Persistent folder: <persistentDataPath>/MccBlueprints/Characters
 using System.IO;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
-using SoftKitty.MasterCharacterCreator;
+using Game.CharacterCreator;
 
 public class CharacterCreationFlow : MonoBehaviour
 {
@@ -24,7 +24,7 @@ public class CharacterCreationFlow : MonoBehaviour
 
     [Header("MCC References")]
     [SerializeField] private CharacterEntity characterEntity;
-    [SerializeField] private GameObject vendorCustomizationRoot; // CanvasRoot/CharacterCustomization
+    [SerializeField] private GameObject customizationRoot; // CanvasRoot/CharacterCustomization
 
     [Header("Our UI")]
     [SerializeField] private GameObject frontPanelRoot;          // CC_UI/FrontPanel
@@ -55,8 +55,8 @@ public class CharacterCreationFlow : MonoBehaviour
             Debug.LogError("CharacterCreationFlow: Missing CharacterEntity reference.");
         if (!frontPanelRoot)
             Debug.LogError("CharacterCreationFlow: Missing frontPanelRoot reference.");
-        if (!vendorCustomizationRoot)
-            Debug.LogError("CharacterCreationFlow: Missing vendorCustomizationRoot reference.");
+        if (!customizationRoot)
+            Debug.LogError("CharacterCreationFlow: Missing customizationRoot reference.");
         if (!nameInput)
             Debug.LogError("CharacterCreationFlow: Missing nameInput reference.");
         if (!createButton)
@@ -66,7 +66,7 @@ public class CharacterCreationFlow : MonoBehaviour
 
         // Start state
         if (frontPanelRoot) frontPanelRoot.SetActive(true);
-        if (vendorCustomizationRoot) vendorCustomizationRoot.SetActive(false);
+        if (customizationRoot) customizationRoot.SetActive(false);
 
         // Only Knight for now
         if (mageButton) mageButton.interactable = false;
@@ -98,7 +98,7 @@ public class CharacterCreationFlow : MonoBehaviour
 
     public void OpenCustomizer()
     {
-        if (!frontPanelRoot || !vendorCustomizationRoot)
+        if (!frontPanelRoot || !customizationRoot)
         {
             Debug.LogError("CharacterCreationFlow: UI roots not assigned; cannot open customizer.");
             return;
@@ -110,21 +110,21 @@ public class CharacterCreationFlow : MonoBehaviour
         }
 
         if (frontPanelRoot) frontPanelRoot.SetActive(false);
-        if (vendorCustomizationRoot) vendorCustomizationRoot.SetActive(true);
+        if (customizationRoot) customizationRoot.SetActive(true);
 
         // Opens MCC customization UI flow
         characterEntity.CustomizeCharacter();
     }
 
-    // Hook this to the vendor "Done" button
-    public void OnVendorDone()
+    // Hook this to the customizer "Done" button
+    public void OnCustomizerDone()
     {
-        if (!frontPanelRoot || !vendorCustomizationRoot)
+        if (!frontPanelRoot || !customizationRoot)
         {
             Debug.LogError("CharacterCreationFlow: UI roots not assigned; cannot return from customizer.");
             return;
         }
-        if (vendorCustomizationRoot) vendorCustomizationRoot.SetActive(false);
+        if (customizationRoot) customizationRoot.SetActive(false);
         if (frontPanelRoot) frontPanelRoot.SetActive(true);
     }
 

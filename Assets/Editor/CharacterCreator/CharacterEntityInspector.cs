@@ -52,7 +52,7 @@ namespace Game.CharacterCreator
                 Application.OpenURL(Application.dataPath.Replace("Assets", "") + _thePath.Replace("Editor/", "Documentation/UserGuide.pdf"));
             }
             GUI.backgroundColor = _titleColor;
-            if (GUILayout.Button("Select Character Data Setting Prefab",GUILayout.Width(250)))
+            if (GUILayout.Button("Select Character Data Setting Prefab", GUILayout.Width(250)))
             {
                 GameObject _data = Resources.Load<GameObject>("CharacterCreator/Core/CharacterData");
                 Selection.activeObject = _data;
@@ -63,7 +63,7 @@ namespace Game.CharacterCreator
             EditorGUILayout.Separator();
 
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label("uid:",GUILayout.Width(40));
+            GUILayout.Label("uid:", GUILayout.Width(40));
             if (myTarget.mCharacterBoneControl != null)
             {
                 GUI.backgroundColor = Color.black;
@@ -78,8 +78,9 @@ namespace Game.CharacterCreator
             {
                 EditorGUIUtility.systemCopyBuffer = myTarget.uid;
             }
-            GUI.backgroundColor = myTarget.mCharacterBoneControl != null?Color.grey:_buttonColor;
-            if (GUILayout.Button("Random",GUILayout.Width(60))) {
+            GUI.backgroundColor = myTarget.mCharacterBoneControl != null ? Color.grey : _buttonColor;
+            if (GUILayout.Button("Random", GUILayout.Width(60)))
+            {
                 if (myTarget.mCharacterBoneControl == null) myTarget.RandomUid();
             }
             GUI.backgroundColor = _backgroundColor;
@@ -96,7 +97,8 @@ namespace Game.CharacterCreator
             }
 
 
-            if (myTarget.uid.Trim()=="") {
+            if (myTarget.uid.Trim() == "")
+            {
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Box(warningIcon, GUILayout.Width(17), GUILayout.Height(17));
                 GUI.color = Color.yellow;
@@ -172,7 +174,7 @@ namespace Game.CharacterCreator
                 }
 
                 EditorGUILayout.BeginHorizontal();
-                
+
                 if (myTarget.mCharacterBoneControl != null)
                 {
                     GUI.backgroundColor = Color.red;
@@ -191,16 +193,16 @@ namespace Game.CharacterCreator
                     EditorGUILayout.EndHorizontal();
                     GUI.color = _buttonColor;
                     EditorGUILayout.BeginHorizontal();
-                    GUILayout.Label("Assets/CharacterCreator/UniqueCharacterAssets/" +myTarget.uid+"/");
+                    GUILayout.Label("Assets/CharacterCreator/UniqueCharacterAssets/" + myTarget.uid + "/");
                 }
                 else
                 {
-                    GUI.backgroundColor = myTarget.uid.Trim() == ""?Color.grey: _titleColor;
+                    GUI.backgroundColor = myTarget.uid.Trim() == "" ? Color.grey : _titleColor;
                     if (GUILayout.Button("Preload Character", GUILayout.Width(200)))
                     {
                         if (myTarget.uid.Trim() != "") myTarget.LoadFromEditor(myTarget.BlueprintPath);
                     }
-                    GUILayout.Box(warningIcon, GUILayout.Width(17),GUILayout.Height(17));
+                    GUILayout.Box(warningIcon, GUILayout.Width(17), GUILayout.Height(17));
                     GUI.color = Color.yellow;
                     if (myTarget.uid.Trim() == "")
                     {
@@ -217,7 +219,7 @@ namespace Game.CharacterCreator
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.HelpBox("Do not preload this character unless you plan to add unique components to it or your character controller requires reference of the renderer or bone transforms.\n" +
                     "Preload this character into the scene, this will create unique material assets in 'UniqueCharacterAssets' folder.\n" +
-                    "The uid and gender of this character can not be changed after preload, but the other customizations are still avaliable.", MessageType.Info,true);
+                    "The uid and gender of this character can not be changed after preload, but the other customizations are still avaliable.", MessageType.Info, true);
                 EditorGUILayout.EndHorizontal();
                 GUI.color = Color.white;
             }
@@ -257,37 +259,41 @@ namespace Game.CharacterCreator
             GUI.color = Color.white;
             EditorGUILayout.EndHorizontal();
 
-            string[] WeaponTypes = new string[4] { "OneHanded", "TwoHanded", "Dual","Custom" };
+            string[] WeaponTypes = new string[4] { "OneHanded", "TwoHanded", "Dual", "Custom" };
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(20);
-            GUILayout.Label("Weapon Equip Type:",GUILayout.Width(150));
+            GUILayout.Label("Weapon Equip Type:", GUILayout.Width(150));
             EditorGUI.BeginChangeCheck();
             myTarget.WeaponEquipType = EditorGUILayout.Popup(myTarget.WeaponEquipType, WeaponTypes, GUILayout.Width(200));
-            if (EditorGUI.EndChangeCheck() || myTarget.Weapons == null || myTarget.Weapons.Length < (myTarget.WeaponEquipType == 2 ? 2 : 1)) {
-                myTarget.Weapons = new WeaponController[myTarget.WeaponEquipType==2?2:1];
+            if (EditorGUI.EndChangeCheck() || myTarget.Weapons == null || myTarget.Weapons.Length < (myTarget.WeaponEquipType == 2 ? 2 : 1))
+            {
+                myTarget.Weapons = new WeaponController[myTarget.WeaponEquipType == 2 ? 2 : 1];
                 _valueChanged = true;
             }
             EditorGUILayout.EndHorizontal();
 
-            for (int i=0;i< myTarget.Weapons.Length;i++) {
+            for (int i = 0; i < myTarget.Weapons.Length; i++)
+            {
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Space(20);
                 if (myTarget.WeaponEquipType < 2)
                 {
-                    GUILayout.Label(myTarget.WeaponEquipType == 0? "OneHanded Weapon:" : "TwoHanded Weapon:", GUILayout.Width(150));
+                    GUILayout.Label(myTarget.WeaponEquipType == 0 ? "OneHanded Weapon:" : "TwoHanded Weapon:", GUILayout.Width(150));
                 }
-                else if (myTarget.WeaponEquipType==2) {
+                else if (myTarget.WeaponEquipType == 2)
+                {
                     GUILayout.Label(i == 0 ? "Left Hand Weapon:" : "Right Hand Weapon:", GUILayout.Width(150));
                 }
                 else
                 {
-                    GUILayout.Label("Weapon #"+(i).ToString(), GUILayout.Width(150));
+                    GUILayout.Label("Weapon #" + (i).ToString(), GUILayout.Width(150));
                 }
-                myTarget.Weapons[i] = (WeaponController)EditorGUILayout.ObjectField(myTarget.Weapons[i],typeof(WeaponController),false,GUILayout.Width(200));
+                myTarget.Weapons[i] = (WeaponController)EditorGUILayout.ObjectField(myTarget.Weapons[i], typeof(WeaponController), false, GUILayout.Width(200));
                 if (myTarget.WeaponEquipType == 3)
                 {
                     GUI.backgroundColor = Color.red;
-                    if (GUILayout.Button("X",GUILayout.Width(20))) {
+                    if (GUILayout.Button("X", GUILayout.Width(20)))
+                    {
                         List<WeaponController> _tempList = new List<WeaponController>();
                         _tempList.AddRange(myTarget.Weapons);
                         _tempList.RemoveAt(i);
@@ -300,18 +306,19 @@ namespace Game.CharacterCreator
                 EditorGUILayout.EndHorizontal();
 
 
-                if (myTarget.Weapons[i]!=null) {
+                if (myTarget.Weapons[i] != null)
+                {
 
                     EditorGUILayout.BeginHorizontal();
                     GUILayout.Space(30);
                     GUI.color = _buttonColor;
-                    GUILayout.Label("> Type: [" + myTarget.Weapons[i].Type.ToString()+"]   Hold Bone: ["+ myTarget.Weapons[i].Data.HoldParentTransform+ "]   Carry Bone: [" + myTarget.Weapons[i].Data.CarryParentTransform + "]");
+                    GUILayout.Label("> Type: [" + myTarget.Weapons[i].Type.ToString() + "]   Hold Bone: [" + myTarget.Weapons[i].Data.HoldParentTransform + "]   Carry Bone: [" + myTarget.Weapons[i].Data.CarryParentTransform + "]");
                     GUI.color = Color.white;
                     EditorGUILayout.EndHorizontal();
 
                     if ((myTarget.Weapons[i].Type == WeaponType.TwoHanded && myTarget.WeaponEquipType != 1)
                         || (myTarget.Weapons[i].Type != WeaponType.TwoHanded && myTarget.WeaponEquipType == 1)
-                        || (myTarget.Weapons[i].Type != WeaponType.LeftHand && myTarget.WeaponEquipType == 2 && i==0)
+                        || (myTarget.Weapons[i].Type != WeaponType.LeftHand && myTarget.WeaponEquipType == 2 && i == 0)
                         || (myTarget.Weapons[i].Type != WeaponType.RightHand && myTarget.WeaponEquipType == 2 && i == 1)
                         )
                     {
@@ -324,13 +331,16 @@ namespace Game.CharacterCreator
                     }
 
                     string _error = "";
-                    for (int u=0;u<myTarget.Weapons.Length;u++) {
-                        if (u!=i && myTarget.Weapons[u]!=null ) {
+                    for (int u = 0; u < myTarget.Weapons.Length; u++)
+                    {
+                        if (u != i && myTarget.Weapons[u] != null)
+                        {
                             if (myTarget.Weapons[u].Data.CarryParentTransform == myTarget.Weapons[i].Data.CarryParentTransform) _error = "<Duplicated Carry Bone>";
-                            if (myTarget.Weapons[u].Data.HoldParentTransform == myTarget.Weapons[i].Data.HoldParentTransform && _error.Length<25) _error += "  <Duplicated Hold Bone>";
+                            if (myTarget.Weapons[u].Data.HoldParentTransform == myTarget.Weapons[i].Data.HoldParentTransform && _error.Length < 25) _error += "  <Duplicated Hold Bone>";
                         }
                     }
-                    if (_error!="") {
+                    if (_error != "")
+                    {
                         EditorGUILayout.BeginHorizontal();
                         GUILayout.Space(20);
                         GUI.color = Color.red;
@@ -361,7 +371,7 @@ namespace Game.CharacterCreator
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(20);
             GUILayout.Label("Default State:", GUILayout.Width(150));
-            myTarget.DefaultWeaponState = (WeaponState)EditorGUILayout.EnumPopup(myTarget.DefaultWeaponState,GUILayout.Width(200));
+            myTarget.DefaultWeaponState = (WeaponState)EditorGUILayout.EnumPopup(myTarget.DefaultWeaponState, GUILayout.Width(200));
             EditorGUILayout.EndHorizontal();
 
 
