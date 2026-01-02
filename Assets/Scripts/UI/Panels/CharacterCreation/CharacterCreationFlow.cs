@@ -17,6 +17,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 using Game.CharacterCreator;
+using SoftKitty;
 
 public class CharacterCreationFlow : MonoBehaviour
 {
@@ -31,6 +32,7 @@ public class CharacterCreationFlow : MonoBehaviour
     [SerializeField] private TMP_InputField nameInput;
     [SerializeField] private Button createButton;
     [SerializeField] private Button customizeButton;
+    [SerializeField] private GameObject previewRoot;             // CC_PreviewCharacter (front-panel preview)
 
     [Header("Class Buttons")]
     [SerializeField] private Button knightButton;
@@ -49,6 +51,9 @@ public class CharacterCreationFlow : MonoBehaviour
     private const string SaveFileExtension = ".bytes";
 
     private string SaveDir => Path.Combine(Application.persistentDataPath, SaveFolderRoot, SaveFolderCharacters);
+    private HoverEffect knightHover;
+    private HoverEffect mageHover;
+    private HoverEffect elfHover;
 
     private void Awake()
     {
@@ -59,8 +64,6 @@ public class CharacterCreationFlow : MonoBehaviour
             Debug.LogError("CharacterCreationFlow: Missing frontPanelRoot reference.");
         if (!customizationRoot)
             Debug.LogError("CharacterCreationFlow: Missing customizationRoot reference.");
-        if (!nameInput)
-            Debug.LogError("CharacterCreationFlow: Missing nameInput reference.");
         // createButton is optional (not used in current flow).
 
         TryEnsureSaveDir();
@@ -95,6 +98,10 @@ public class CharacterCreationFlow : MonoBehaviour
             createButton.gameObject.SetActive(false);
 
         selectedClass = PlayerClass.Knight;
+        CacheHoverEffects();
+
+        if (!previewRoot)
+            previewRoot = GameObject.Find("CC_PreviewCharacter");
     }
 
     private void Start()
@@ -109,6 +116,26 @@ public class CharacterCreationFlow : MonoBehaviour
             yield break;
         if (UnityEngine.EventSystems.EventSystem.current != null)
             UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(knightButton.gameObject);
+        ApplyClassHighlight();
+    }
+
+    private void Update()
+    {
+        ApplyClassHighlight();
+    }
+
+    private void CacheHoverEffects()
+    {
+        if (knightButton) knightHover = knightButton.GetComponent<HoverEffect>();
+        if (mageButton) mageHover = mageButton.GetComponent<HoverEffect>();
+        if (elfButton) elfHover = elfButton.GetComponent<HoverEffect>();
+    }
+
+    private void ApplyClassHighlight()
+    {
+        if (knightHover) knightHover.isHover = selectedClass == PlayerClass.Knight;
+        if (mageHover) mageHover.isHover = selectedClass == PlayerClass.Mage;
+        if (elfHover) elfHover.isHover = selectedClass == PlayerClass.Elf;
     }
 
     public void SelectKnight()
@@ -150,7 +177,10 @@ public class CharacterCreationFlow : MonoBehaviour
         Debug.Log($"CharacterCreationFlow: frontPanelRoot active={frontPanelRoot.activeSelf}, customizationRoot active={customizationRoot.activeSelf}");
 
         if (TryOpenEmbeddedCustomizer())
+        {
+            SetPreviewVisible(false);
             return;
+        }
 
         // Fallback to MCC transition flow
         characterEntity.CustomizeCharacter();
@@ -191,7 +221,7 @@ public class CharacterCreationFlow : MonoBehaviour
         CharacterCusUI.Settings = new CharacterCusSetting()
         {
             AllowCustomOutfit = CharacterManager.instance.AllowOutfitsWhenCustomize,
-            AllowNameChange = CharacterManager.instance.AllowChangeNameWhenCustomize,
+            AllowNameChange = true,
             AllowSexSwitch = CharacterManager.instance.AllowChangeSexWhenCustomize,
             AllowRaceChange = CharacterManager.instance.AllowChangeRaceWhenCustomize,
             RaceSettingVisible = CharacterManager.instance.RaceSettingVisible,
@@ -218,6 +248,17 @@ public class CharacterCreationFlow : MonoBehaviour
         }
 
         return true;
+    }
+
+    private void SetPreviewVisible(bool isVisible)
+    {
+        if (previewRoot)
+        {
+            previewRoot.SetActive(isVisible);
+            return;
+        }
+        if (characterEntity)
+            characterEntity.gameObject.SetActive(isVisible);
     }
 
     private static void NormalizeAppearance(CharacterAppearance appearance)
@@ -261,10 +302,10 @@ public class CharacterCreationFlow : MonoBehaviour
 
         if (appearance._CharacterData == null)
             appearance._CharacterData = CharacterData.Create((byte)Sex.Male);
-        if (appearance._CharacterData.DataInt == null || appearance._CharacterData.DataInt.Length != 10)
+        if (appearance._CharacterData.DataInt == null || appearance._CharacterData.DataInt.Length != 12)
         {
             var old = appearance._CharacterData.DataInt;
-            appearance._CharacterData.DataInt = new byte[10];
+            appearance._CharacterData.DataInt = new byte[12];
             if (old != null)
             {
                 for (var i = 0; i < Mathf.Min(old.Length, appearance._CharacterData.DataInt.Length); i++)
@@ -317,6 +358,7 @@ public class CharacterCreationFlow : MonoBehaviour
         }
         if (customizationRoot) customizationRoot.SetActive(false);
         if (frontPanelRoot) frontPanelRoot.SetActive(true);
+        SetPreviewVisible(true);
     }
 
     public void CreateCharacter()

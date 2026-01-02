@@ -308,6 +308,11 @@ namespace Game.CharacterCreator
         public static CharacterAppearance LoadCharacterDataFromResources(string _resourcePath, CharacterAppearance _data)
         {
             TextAsset bindata = Resources.Load(_resourcePath) as TextAsset;
+            if (bindata == null)
+            {
+                Debug.LogError($"CharacterManager: Missing resource at '{_resourcePath}'.");
+                return _data ?? new CharacterAppearance(CharacterData.Create((byte)Sex.Male));
+            }
             CharacterAppearance _result;
             if (_data == null)
             {

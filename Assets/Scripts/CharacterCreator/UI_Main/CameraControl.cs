@@ -30,6 +30,11 @@ namespace Game.CharacterCreator
             instance = this;
         }
 
+        public void SetFaceFocus(bool focus)
+        {
+            targetFov = focus ? 20F : 43F;
+        }
+
 
         void Update()
         {

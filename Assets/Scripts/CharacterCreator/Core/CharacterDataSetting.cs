@@ -416,7 +416,7 @@ namespace Game.CharacterCreator
         public byte Race=0;
         public byte[] DataFloat = new byte[120];
         public Uint8Color[] DataColor = new Uint8Color[15];
-        public byte[] DataInt = new byte[10];
+        public byte[] DataInt = new byte[12];
        
 
         public CharacterData Copy()
@@ -426,7 +426,7 @@ namespace Game.CharacterCreator
             _copy.Race = Race;
             _copy.DataFloat = new byte[120];
             _copy.DataColor = new Uint8Color[15];
-            _copy.DataInt = new byte[10];
+            _copy.DataInt = new byte[12];
             for (int i = 0; i < DataFloat.Length; i++)
             {
                 _copy.DataFloat[i] = DataFloat[i];
@@ -515,7 +515,7 @@ namespace Game.CharacterCreator
         {
             DataFloat = new byte[120];
             DataColor = new Uint8Color[15];
-            DataInt = new byte[10];
+            DataInt = new byte[12];
             Race = 0;
             for (int i = 0; i < DataFloat.Length; i++)
             {

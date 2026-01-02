@@ -21,20 +21,44 @@ namespace Game.CharacterCreator
         public Text valueText;
         public Image ColorSample;
         public bool EnableAlpha = true;
+        private CanvasGroup canvasGroup;
 
+        private void Awake()
+        {
+            canvasGroup = GetComponent<CanvasGroup>();
+            EnsureMainScript();
+        }
+
+        private void EnsureMainScript()
+        {
+            if (!MainScript)
+                MainScript = GetComponentInParent<CharacterCusUI>(true);
+        }
 
         private void Update()
         {
-            if (!MainScript.Initialized) return;
+            EnsureMainScript();
+            if (!MainScript || !MainScript.Initialized || MainScript.MyCharacter == null || MainScript.MyCharacter.MyData == null)
+                return;
+            if (CharacterDataSetting.instance == null)
+                return;
             if (Type == ColorSettingTypes.Race) {
                 if (valueText)
                 {
-                    int _id = Mathf.Clamp( (int)MainScript.MyCharacter.MyData._CharacterData.Race,0, CharacterDataSetting.instance.RaceSettings.Length-1);
+                    if (CharacterDataSetting.instance.RaceSettings == null || CharacterDataSetting.instance.RaceSettings.Length == 0)
+                        return;
+                    int _id = Mathf.Clamp((int)MainScript.MyCharacter.MyData._CharacterData.Race, 0, CharacterDataSetting.instance.RaceSettings.Length - 1);
                     valueText.text = CharacterDataSetting.instance.RaceSettings[_id].RaceName;
                 }
             }
             else if (Type == ColorSettingTypes.Body)
             {
+                if (CharacterDataSetting.instance.MaleMaterialSettings == null)
+                    return;
+                if (SettingColor < 0 || SettingColor >= CharacterDataSetting.instance.MaleMaterialSettings.Length)
+                    return;
+                if (SettingTexture < 0 || SettingTexture >= CharacterDataSetting.instance.MaleMaterialSettings.Length)
+                    return;
                 if (ColorSample)
                     ColorSample.color = Uint8Color.Get(MainScript.MyCharacter.MyData._CharacterData.DataColor[(int)CharacterDataSetting.instance.MaleMaterialSettings[SettingColor].ColorType]);
                 if (valueText)
@@ -43,24 +67,30 @@ namespace Game.CharacterCreator
             else
             {
                 if (MainScript.GetCurrentOutfitSettingId() > -1 && CharacterCusUI.Settings.AllowCustomOutfit) {
-                    GetComponent<CanvasGroup>().interactable = isEnable();
+                    if (canvasGroup)
+                        canvasGroup.interactable = isEnable();
                     switch (SettingColor)
                     {
                         case 1:
-                            ColorSample.color = Uint8Color.Get(MainScript.MyCharacter.MyData._CusColor1[MainScript.GetCurrentOutfitSettingId()]);
+                            if (MainScript.MyCharacter.MyData._CusColor1 != null && MainScript.GetCurrentOutfitSettingId() < MainScript.MyCharacter.MyData._CusColor1.Length)
+                                ColorSample.color = Uint8Color.Get(MainScript.MyCharacter.MyData._CusColor1[MainScript.GetCurrentOutfitSettingId()]);
                             break;
                         case 2:
-                            ColorSample.color = Uint8Color.Get(MainScript.MyCharacter.MyData._CusColor2[MainScript.GetCurrentOutfitSettingId()]);
+                            if (MainScript.MyCharacter.MyData._CusColor2 != null && MainScript.GetCurrentOutfitSettingId() < MainScript.MyCharacter.MyData._CusColor2.Length)
+                                ColorSample.color = Uint8Color.Get(MainScript.MyCharacter.MyData._CusColor2[MainScript.GetCurrentOutfitSettingId()]);
                             break;
                         case 3:
-                            ColorSample.color = Uint8Color.Get(MainScript.MyCharacter.MyData._CusColor3[MainScript.GetCurrentOutfitSettingId()]);
+                            if (MainScript.MyCharacter.MyData._CusColor3 != null && MainScript.GetCurrentOutfitSettingId() < MainScript.MyCharacter.MyData._CusColor3.Length)
+                                ColorSample.color = Uint8Color.Get(MainScript.MyCharacter.MyData._CusColor3[MainScript.GetCurrentOutfitSettingId()]);
                             break;
 
                     }
                 } else {
-                    GetComponent<CanvasGroup>().interactable = false;
+                    if (canvasGroup)
+                        canvasGroup.interactable = false;
                 }
-                GetComponent<CanvasGroup>().alpha = Mathf.Lerp(GetComponent<CanvasGroup>().alpha, GetComponent<CanvasGroup>().interactable ? 1F : 0F ,Time.deltaTime*5F );
+                if (canvasGroup)
+                    canvasGroup.alpha = Mathf.Lerp(canvasGroup.alpha, canvasGroup.interactable ? 1F : 0F, Time.deltaTime * 5F);
             }
             
         }
@@ -117,8 +147,15 @@ namespace Game.CharacterCreator
 
         public void AddValue(int _change)
         {
+            EnsureMainScript();
+            if (!MainScript || !MainScript.Initialized || MainScript.MyCharacter == null || MainScript.MyCharacter.MyData == null)
+                return;
+            if (CharacterDataSetting.instance == null)
+                return;
             if (Type == ColorSettingTypes.Race)
             {
+                if (CharacterDataSetting.instance.RaceSettings == null || CharacterDataSetting.instance.RaceSettings.Length == 0)
+                    return;
                 int temp = Mathf.Clamp((int)MainScript.MyCharacter.MyData._CharacterData.Race, 0, CharacterDataSetting.instance.RaceSettings.Length - 1) + _change;
                 if (temp > CharacterDataSetting.instance.RaceSettings.Length - 1) {
                     temp = 0;
@@ -146,6 +183,10 @@ namespace Game.CharacterCreator
             }
             else
             {
+                if (CharacterDataSetting.instance.MaleMaterialSettings == null)
+                    return;
+                if (SettingTexture < 0 || SettingTexture >= CharacterDataSetting.instance.MaleMaterialSettings.Length)
+                    return;
                 int temp = MainScript.MyCharacter.MyData._CharacterData.DataInt[(int)CharacterDataSetting.instance.MaleMaterialSettings[SettingTexture].TextureType] + _change;
                 if (temp > CharacterDataSetting.instance.MaleMaterialSettings[SettingTexture].TextureIdMax)
                 {

@@ -84,12 +84,15 @@ namespace Game.CharacterCreator
 
         private IEnumerator Start()
         {
+            if (Initialized)
+                yield break;
             while (TransitionUI.instance != null) yield return 1;
             Initialize();
             yield return new WaitForSeconds(0.3F);
             GetComponent<Animation>().Play("cc_in");
             GetComponent<CanvasGroup>().alpha = 1F;
-            CameraControl.instance.Initialized = true;
+            if (CameraControl.instance != null)
+                CameraControl.instance.Initialized = true;
         }
         public OutfitColorSetting GetOutfitSetting()
         {
@@ -325,7 +328,8 @@ namespace Game.CharacterCreator
         public void InitializeCharacter()
         {
             MyCharacter.Initialize(AppearanceData);
-            MyCharacter.transform.localEulerAngles = new Vector3(0F, -5F, 0F);
+            MyCharacter.transform.localPosition = new Vector3(0F, -0.1F, -7F);
+            MyCharacter.transform.localEulerAngles = new Vector3(0F, 180F, 0F);
             RefreshData();
             MyCharacter.GetComponent<Animator>().SetTrigger("Enter");
         }
@@ -489,7 +493,21 @@ namespace Game.CharacterCreator
 
         public void Preset(int _id)
         {
-            AppearanceData = CharacterManager.LoadCharacterDataFromResources( "CharacterCreator/Presets/shape_"+_id.ToString()+"_"+mSex.ToString(), AppearanceData).Copy();
+            var presetName = "shape_" + _id.ToString() + "_" + mSex.ToString();
+            var resourcePath = "CharacterCreator/Presets/" + presetName;
+            var data = Resources.Load<TextAsset>(resourcePath);
+            if (data == null)
+            {
+                resourcePath = "MasterCharacterCreator/Presets/" + presetName;
+                data = Resources.Load<TextAsset>(resourcePath);
+            }
+            if (data == null)
+            {
+                Debug.LogWarning($"CharacterCusUI: Missing preset '{presetName}'.");
+                return;
+            }
+
+            AppearanceData = CharacterManager.LoadCharacterDataFromResources(resourcePath, AppearanceData).Copy();
             MyCharacter.Initialize(AppearanceData);
             RefreshData();
             ToggleByteFileList(false);
@@ -499,9 +517,15 @@ namespace Game.CharacterCreator
         public void RandomLook()
         {
             Color[] _colors = ColorPicker.GetColorPalette();
+            if (_colors == null || _colors.Length == 0)
+            {
+                Debug.LogWarning("CharacterCusUI: Color palette is empty; cannot randomize look.");
+                return;
+            }
             List<Color> _skinColors = new List<Color>();
             List<Color> _hairColors = new List<Color>();
-            for (int i=0;i<50;i++) {
+            var max = Mathf.Min(50, _colors.Length);
+            for (int i = 0; i < max; i++) {
                if(i<=12 || (i>=20 && i<=24) || (i>=30 && i<=34)) _skinColors.Add(_colors[i]);
                if (i <= 12 || (i >= 15 && i <= 24) || i >= 35) _hairColors.Add(_colors[i]);
             }
@@ -549,9 +573,19 @@ namespace Game.CharacterCreator
             }
             CurrentSlot = MyLeftSliders[_id].OutfitSlot;
             MyCharacter.GetComponent<Animator>().SetBool("Static", CurrentSlider==0);
+            if (CameraControl.instance != null)
+                CameraControl.instance.SetFaceFocus(IsFaceSection(MyLeftSliders[_id]));
             if (_id != -1 && onSwitchUI!=null) onSwitchUI();
             if (ColorPicker.instance != null) ColorPicker.instance.Cancel();
             SoundManager.Play2D("MenuOff");
+        }
+
+        private static bool IsFaceSection(CharacterCusSliders slider)
+        {
+            if (slider == null || string.IsNullOrWhiteSpace(slider.SliderName))
+                return false;
+            var name = slider.SliderName.ToLowerInvariant();
+            return name.Contains("face");
         }
 
         public void Close()
