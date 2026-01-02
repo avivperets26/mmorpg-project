@@ -3,19 +3,17 @@
 // - characterEntity: GameObject with CharacterEntity component (the MCC character instance).
 // - customizationRoot: root GameObject for MCC UI (e.g., CanvasRoot/CharacterCustomization).
 // - frontPanelRoot: root GameObject for our front panel (e.g., CC_UI/FrontPanel).
-// - nameInput: TMP_InputField for the player name.
-// - createButton: Create button (OnClick -> CreateCharacter).
+// - nameInput: InputField for the player name (customizer view).
 // - knightButton: Knight button (OnClick -> SelectKnight).
 // - mageButton: Mage button (OnClick -> SelectMage) [kept disabled].
 // - elfButton: Elf button (OnClick -> SelectElf) [kept disabled].
 // - Customize button (if present): OnClick -> OpenCustomizer.
-// - Customizer "Done" button: OnClick -> OnCustomizerDone.
+// - Customizer "Create Character" button: OnClick -> CreateCharacter.
 // Persistent folder: <persistentDataPath>/MccBlueprints/Characters
 using System.IO;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using TMPro;
 using Game.CharacterCreator;
 using SoftKitty;
 
@@ -29,8 +27,7 @@ public class CharacterCreationFlow : MonoBehaviour
 
     [Header("Our UI")]
     [SerializeField] private GameObject frontPanelRoot;          // CC_UI/FrontPanel
-    [SerializeField] private TMP_InputField nameInput;
-    [SerializeField] private Button createButton;
+    [SerializeField] private UnityEngine.UI.InputField nameInput;
     [SerializeField] private Button customizeButton;
     [SerializeField] private GameObject previewRoot;             // CC_PreviewCharacter (front-panel preview)
 
@@ -64,7 +61,7 @@ public class CharacterCreationFlow : MonoBehaviour
             Debug.LogError("CharacterCreationFlow: Missing frontPanelRoot reference.");
         if (!customizationRoot)
             Debug.LogError("CharacterCreationFlow: Missing customizationRoot reference.");
-        // createButton is optional (not used in current flow).
+        // Front panel NameInput is not used in this flow.
 
         TryEnsureSaveDir();
 
@@ -78,7 +75,8 @@ public class CharacterCreationFlow : MonoBehaviour
 
         if (!customizeButton && frontPanelRoot)
         {
-            var customizeTransform = frontPanelRoot.transform.Find("Btn_Customize");
+            var customizeTransform = frontPanelRoot.transform.Find("Btn_CustomizeCharacter")
+                ?? frontPanelRoot.transform.Find("Btn_Customize");
             if (customizeTransform)
                 customizeButton = customizeTransform.GetComponent<Button>();
         }
@@ -89,13 +87,16 @@ public class CharacterCreationFlow : MonoBehaviour
             customizeButton.onClick.AddListener(OpenCustomizer);
         }
 
-        if (nameInput)
+        var frontName = frontPanelRoot ? frontPanelRoot.transform.Find("NameInput") : null;
+        if (frontName)
+            frontName.gameObject.SetActive(false);
+
+        if (!nameInput)
         {
-            nameInput.gameObject.SetActive(false);
-            nameInput.onValueChanged.RemoveAllListeners();
+            var customizer = customizationRoot ? customizationRoot.GetComponentInChildren<CharacterCusUI>(true) : null;
+            if (customizer && customizer.NameInput)
+                nameInput = customizer.NameInput;
         }
-        if (createButton)
-            createButton.gameObject.SetActive(false);
 
         selectedClass = PlayerClass.Knight;
         CacheHoverEffects();
@@ -142,19 +143,16 @@ public class CharacterCreationFlow : MonoBehaviour
     {
         Debug.Log("CharacterCreationFlow: SelectKnight");
         selectedClass = PlayerClass.Knight;
-        RefreshCreateButton();
     }
 
     public void SelectMage()
     {
         selectedClass = PlayerClass.Mage;
-        RefreshCreateButton();
     }
 
     public void SelectElf()
     {
         selectedClass = PlayerClass.Elf;
-        RefreshCreateButton();
     }
 
     public void OpenCustomizer()
@@ -370,7 +368,7 @@ public class CharacterCreationFlow : MonoBehaviour
         }
         if (!nameInput)
         {
-            Debug.LogError("CharacterCreationFlow: Missing name input; cannot create character.");
+            Debug.LogError("CharacterCreationFlow: Missing customizer name input; cannot create character.");
             return;
         }
 
@@ -415,15 +413,6 @@ public class CharacterCreationFlow : MonoBehaviour
         PlayerPrefs.Save();
 
         SceneManager.LoadScene(worldSceneName);
-    }
-
-    private void RefreshCreateButton()
-    {
-        if (!createButton) return;
-
-        var hasName = !string.IsNullOrWhiteSpace(nameInput?.text);
-        var classOk = selectedClass == PlayerClass.Knight; // only Knight allowed now
-        createButton.interactable = hasName && classOk;
     }
 
     private bool TryEnsureSaveDir()
