@@ -39,6 +39,7 @@ public class CharacterCreationFlow : MonoBehaviour
     [Header("Settings")]
     [SerializeField] private string worldSceneName = "World";
     [SerializeField] private PlayerClass selectedClass = PlayerClass.Knight;
+    [SerializeField] private ClassDescriptionPanel classDescriptionPanel;
 
     private const string PlayerNameKey = "PlayerName";
     private const string PlayerClassKey = "PlayerClass";
@@ -62,6 +63,8 @@ public class CharacterCreationFlow : MonoBehaviour
         if (!customizationRoot)
             Debug.LogError("CharacterCreationFlow: Missing customizationRoot reference.");
         // Front panel NameInput is not used in this flow.
+        if (!classDescriptionPanel && frontPanelRoot)
+            classDescriptionPanel = frontPanelRoot.GetComponentInChildren<ClassDescriptionPanel>(true);
 
         TryEnsureSaveDir();
 
@@ -69,9 +72,21 @@ public class CharacterCreationFlow : MonoBehaviour
         if (frontPanelRoot) frontPanelRoot.SetActive(true);
         if (customizationRoot) customizationRoot.SetActive(false);
 
-        // Only Knight for now
-        if (mageButton) mageButton.interactable = false;
-        if (elfButton) elfButton.interactable = false;
+        if (knightButton)
+        {
+            knightButton.onClick.RemoveListener(SelectKnight);
+            knightButton.onClick.AddListener(SelectKnight);
+        }
+        if (mageButton)
+        {
+            mageButton.onClick.RemoveListener(SelectMage);
+            mageButton.onClick.AddListener(SelectMage);
+        }
+        if (elfButton)
+        {
+            elfButton.onClick.RemoveListener(SelectElf);
+            elfButton.onClick.AddListener(SelectElf);
+        }
 
         if (!customizeButton && frontPanelRoot)
         {
@@ -100,6 +115,7 @@ public class CharacterCreationFlow : MonoBehaviour
 
         selectedClass = PlayerClass.Knight;
         CacheHoverEffects();
+        RefreshClassDescription();
 
         if (!previewRoot)
             previewRoot = GameObject.Find("CC_PreviewCharacter");
@@ -118,6 +134,7 @@ public class CharacterCreationFlow : MonoBehaviour
         if (UnityEngine.EventSystems.EventSystem.current != null)
             UnityEngine.EventSystems.EventSystem.current.SetSelectedGameObject(knightButton.gameObject);
         ApplyClassHighlight();
+        RefreshClassDescription();
     }
 
     private void Update()
@@ -127,9 +144,9 @@ public class CharacterCreationFlow : MonoBehaviour
 
     private void CacheHoverEffects()
     {
-        if (knightButton) knightHover = knightButton.GetComponent<HoverEffect>();
-        if (mageButton) mageHover = mageButton.GetComponent<HoverEffect>();
-        if (elfButton) elfHover = elfButton.GetComponent<HoverEffect>();
+        if (knightButton) knightHover = knightButton.GetComponentInChildren<HoverEffect>(true);
+        if (mageButton) mageHover = mageButton.GetComponentInChildren<HoverEffect>(true);
+        if (elfButton) elfHover = elfButton.GetComponentInChildren<HoverEffect>(true);
     }
 
     private void ApplyClassHighlight()
@@ -143,16 +160,24 @@ public class CharacterCreationFlow : MonoBehaviour
     {
         Debug.Log("CharacterCreationFlow: SelectKnight");
         selectedClass = PlayerClass.Knight;
+        ApplyClassHighlight();
+        RefreshClassDescription();
     }
 
     public void SelectMage()
     {
+        Debug.Log("CharacterCreationFlow: SelectMage");
         selectedClass = PlayerClass.Mage;
+        ApplyClassHighlight();
+        RefreshClassDescription();
     }
 
     public void SelectElf()
     {
+        Debug.Log("CharacterCreationFlow: SelectElf");
         selectedClass = PlayerClass.Elf;
+        ApplyClassHighlight();
+        RefreshClassDescription();
     }
 
     public void OpenCustomizer()
@@ -257,6 +282,23 @@ public class CharacterCreationFlow : MonoBehaviour
         }
         if (characterEntity)
             characterEntity.gameObject.SetActive(isVisible);
+    }
+    private void RefreshClassDescription()
+    {
+        if (!classDescriptionPanel) return;
+
+        switch (selectedClass)
+        {
+            case PlayerClass.Knight:
+                classDescriptionPanel.SetKnight();
+                break;
+            case PlayerClass.Mage:
+                classDescriptionPanel.SetMage();
+                break;
+            case PlayerClass.Elf:
+                classDescriptionPanel.SetElf();
+                break;
+        }
     }
 
     private static void NormalizeAppearance(CharacterAppearance appearance)
