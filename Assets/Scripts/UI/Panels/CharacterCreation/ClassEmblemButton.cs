@@ -10,7 +10,7 @@ public class ClassEmblemButton : MonoBehaviour, IPointerEnterHandler, IPointerEx
     [Header("Visuals")]
     [SerializeField] private Color normalColor = Color.white;
     [SerializeField] private Color hoverColor = Color.white;
-    [SerializeField] private Color selectedColor = new Color(1f, 0.95f, 0.7f, 1f);
+    [SerializeField] private Color selectedColor = Color.white;
     [SerializeField] private float normalScale = 1f;
     [SerializeField] private float hoverScale = 1.05f;
     [SerializeField] private float selectedScale = 1.08f;
@@ -36,6 +36,11 @@ public class ClassEmblemButton : MonoBehaviour, IPointerEnterHandler, IPointerEx
     {
         if (!emblemImage) emblemImage = GetComponent<Image>();
         DisableHoverEffects();
+        Refresh(true);
+    }
+
+    private void OnEnable()
+    {
         Refresh(true);
     }
 

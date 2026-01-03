@@ -16,6 +16,7 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using Game.CharacterCreator;
 using SoftKitty;
+using SoftKittyMcc = SoftKitty.MasterCharacterCreator;
 
 public class CharacterCreationFlow : MonoBehaviour
 {
@@ -29,7 +30,7 @@ public class CharacterCreationFlow : MonoBehaviour
     [SerializeField] private GameObject frontPanelRoot;          // CC_UI/FrontPanel
     [SerializeField] private UnityEngine.UI.InputField nameInput;
     [SerializeField] private Button customizeButton;
-    [SerializeField] private GameObject previewRoot;             // CC_PreviewCharacter (front-panel preview)
+    [SerializeField] private GameObject previewRoot;             // Optional root for preview characters
 
     [Header("Class Buttons")]
     [SerializeField] private Button knightButton;
@@ -40,6 +41,18 @@ public class CharacterCreationFlow : MonoBehaviour
     [SerializeField] private ClassEmblemButton knightEmblem;
     [SerializeField] private ClassEmblemButton mageEmblem;
     [SerializeField] private ClassEmblemButton elfEmblem;
+
+    [Header("Class Previews")]
+    [SerializeField] private GameObject knightPreview;
+    [SerializeField] private GameObject magePreview;
+    [SerializeField] private GameObject elfPreview;
+    [SerializeField, Range(0.1f, 1f)] private float previewDimBrightness = 0.35f;
+    [SerializeField, Range(0.5f, 1.5f)] private float previewSelectedBrightness = 1f;
+
+    [Header("Preview Presets")]
+    [SerializeField] private string knightPresetPath = "MccBlueprints/Characters_bytes/knight_preset.bytes";
+    [SerializeField] private string magePresetPath = "MccBlueprints/Characters_bytes/mage_preset.bytes";
+    [SerializeField] private string elfPresetPath = "MccBlueprints/Characters_bytes/elf_preset.bytes";
 
     [Header("Settings")]
     [SerializeField] private string worldSceneName = "World";
@@ -52,12 +65,25 @@ public class CharacterCreationFlow : MonoBehaviour
     private const string SaveFolderRoot = "MccBlueprints";
     private const string SaveFolderCharacters = "Characters";
     private const string SaveFileExtension = ".bytes";
+    private const string KnightPreviewName = "CC_PreviewCharacter_Knight";
+    private const string MagePreviewName = "CC_PreviewCharacter_Mage";
+    private const string ElfPreviewName = "CC_PreviewCharacter_Elf";
+
+    private Renderer[] knightPreviewRenderers;
+    private Renderer[] magePreviewRenderers;
+    private Renderer[] elfPreviewRenderers;
+    private CharacterEntity knightPreviewEntity;
+    private CharacterEntity magePreviewEntity;
+    private CharacterEntity elfPreviewEntity;
+    private SoftKittyMcc.CharacterEntity elfPreviewEntityMcc;
+    private MaterialPropertyBlock previewBlock;
 
     private string SaveDir => Path.Combine(Application.persistentDataPath, SaveFolderRoot, SaveFolderCharacters);
 
     private void Awake()
     {
         Debug.Log("CharacterCreationFlow: Awake");
+        previewBlock = new MaterialPropertyBlock();
         if (!characterEntity)
             Debug.LogError("CharacterCreationFlow: Missing CharacterEntity reference.");
         if (!frontPanelRoot)
@@ -117,16 +143,20 @@ public class CharacterCreationFlow : MonoBehaviour
 
         selectedClass = PlayerClass.Knight;
         CacheEmblems();
+        CachePreviews();
+        ResolveCharacterEntity();
+        EnsurePreviewSex();
         ApplyClassHighlight();
         RefreshClassDescription();
 
         if (!previewRoot)
-            previewRoot = GameObject.Find("CC_PreviewCharacter");
+            previewRoot = GameObject.Find("PreviewCharacters");
     }
 
     private void Start()
     {
         StartCoroutine(SelectKnightNextFrame());
+        StartCoroutine(ApplyPreviewPresetsNextFrame());
     }
 
     private System.Collections.IEnumerator SelectKnightNextFrame()
@@ -140,6 +170,12 @@ public class CharacterCreationFlow : MonoBehaviour
         RefreshClassDescription();
     }
 
+    private System.Collections.IEnumerator ApplyPreviewPresetsNextFrame()
+    {
+        yield return null;
+        ApplyPreviewPresets();
+    }
+
     private void CacheEmblems()
     {
         if (!knightEmblem && knightButton)
@@ -150,11 +186,144 @@ public class CharacterCreationFlow : MonoBehaviour
             elfEmblem = elfButton.GetComponentInChildren<ClassEmblemButton>(true);
     }
 
+    private void CachePreviews()
+    {
+        if (!knightPreview)
+            knightPreview = GameObject.Find(KnightPreviewName);
+        if (!magePreview)
+            magePreview = GameObject.Find(MagePreviewName);
+        if (!elfPreview)
+            elfPreview = GameObject.Find(ElfPreviewName);
+
+        if (knightPreview)
+        {
+            knightPreviewRenderers = knightPreview.GetComponentsInChildren<Renderer>(true);
+            knightPreviewEntity = knightPreview.GetComponent<CharacterEntity>();
+        }
+        if (magePreview)
+        {
+            magePreviewRenderers = magePreview.GetComponentsInChildren<Renderer>(true);
+            magePreviewEntity = magePreview.GetComponent<CharacterEntity>();
+        }
+        if (elfPreview)
+        {
+            elfPreviewRenderers = elfPreview.GetComponentsInChildren<Renderer>(true);
+            elfPreviewEntity = elfPreview.GetComponent<CharacterEntity>();
+            elfPreviewEntityMcc = elfPreview.GetComponent<SoftKittyMcc.CharacterEntity>();
+        }
+    }
+
+    private void ResolveCharacterEntity()
+    {
+        if (characterEntity && characterEntity.gameObject.scene.IsValid())
+            return;
+
+        if (knightPreviewEntity)
+            characterEntity = knightPreviewEntity;
+    }
+
+    private void EnsurePreviewSex()
+    {
+        EnsurePreviewSex(knightPreviewEntity, Sex.Male);
+        EnsurePreviewSex(magePreviewEntity, Sex.Male);
+        EnsurePreviewSex(elfPreviewEntity, Sex.Female);
+        EnsurePreviewSex(elfPreviewEntityMcc, SoftKittyMcc.Sex.Female);
+    }
+
+    private static void EnsurePreviewSex(CharacterEntity entity, Sex targetSex)
+    {
+        if (!entity || entity.sex == targetSex)
+            return;
+
+        entity.Initialize(targetSex);
+    }
+
+    private static void EnsurePreviewSex(SoftKittyMcc.CharacterEntity entity, SoftKittyMcc.Sex targetSex)
+    {
+        if (!entity || entity.sex == targetSex)
+            return;
+
+        entity.Initialize(targetSex);
+    }
+
+    private void ApplyPreviewPresets()
+    {
+        ApplyPreviewPreset(knightPreviewEntity, knightPresetPath, "Knight");
+        ApplyPreviewPreset(magePreviewEntity, magePresetPath, "Mage");
+        if (elfPreviewEntityMcc != null)
+            ApplyPreviewPreset(elfPreviewEntityMcc, elfPresetPath, "Elf");
+        else
+            ApplyPreviewPreset(elfPreviewEntity, elfPresetPath, "Elf");
+    }
+
+    private static void ApplyPreviewPreset(CharacterEntity entity, string presetPath, string label)
+    {
+        if (!entity)
+            return;
+        if (string.IsNullOrWhiteSpace(presetPath))
+            return;
+
+        var fullPath = Path.Combine(Application.dataPath, presetPath);
+        if (!File.Exists(fullPath))
+        {
+            Debug.LogWarning($"CharacterCreationFlow: {label} preset not found at '{fullPath}'.");
+            return;
+        }
+
+        entity.LoadFromByteFileFromDisk(fullPath);
+    }
+
+    private static void ApplyPreviewPreset(SoftKittyMcc.CharacterEntity entity, string presetPath, string label)
+    {
+        if (!entity)
+            return;
+        if (string.IsNullOrWhiteSpace(presetPath))
+            return;
+
+        var fullPath = Path.Combine(Application.dataPath, presetPath);
+        if (!File.Exists(fullPath))
+        {
+            Debug.LogWarning($"CharacterCreationFlow: {label} preset not found at '{fullPath}'.");
+            return;
+        }
+
+        entity.LoadFromByteFileFromDisk(fullPath);
+    }
+
     private void ApplyClassHighlight()
     {
         if (knightEmblem) knightEmblem.SetSelected(selectedClass == PlayerClass.Knight);
         if (mageEmblem) mageEmblem.SetSelected(selectedClass == PlayerClass.Mage);
         if (elfEmblem) elfEmblem.SetSelected(selectedClass == PlayerClass.Elf);
+        ApplyPreviewHighlight();
+    }
+
+    private void ApplyPreviewHighlight()
+    {
+        SetPreviewBrightness(knightPreviewRenderers, selectedClass == PlayerClass.Knight);
+        SetPreviewBrightness(magePreviewRenderers, selectedClass == PlayerClass.Mage);
+        SetPreviewBrightness(elfPreviewRenderers, selectedClass == PlayerClass.Elf);
+    }
+
+    private void SetPreviewBrightness(Renderer[] renderers, bool isSelected)
+    {
+        if (renderers == null || renderers.Length == 0)
+            return;
+
+        var brightness = isSelected ? previewSelectedBrightness : previewDimBrightness;
+        var tint = new Color(brightness, brightness, brightness, 1f);
+
+        for (var i = 0; i < renderers.Length; i++)
+        {
+            var renderer = renderers[i];
+            if (!renderer)
+                continue;
+
+            renderer.GetPropertyBlock(previewBlock);
+            previewBlock.SetColor("_Color", tint);
+            previewBlock.SetColor("_BaseColor", tint);
+            renderer.SetPropertyBlock(previewBlock);
+        }
     }
 
     public void SelectKnight()
@@ -281,6 +450,9 @@ public class CharacterCreationFlow : MonoBehaviour
             previewRoot.SetActive(isVisible);
             return;
         }
+        if (knightPreview) knightPreview.SetActive(isVisible);
+        if (magePreview) magePreview.SetActive(isVisible);
+        if (elfPreview) elfPreview.SetActive(isVisible);
         if (characterEntity)
             characterEntity.gameObject.SetActive(isVisible);
     }
