@@ -36,6 +36,11 @@ public class CharacterCreationFlow : MonoBehaviour
     [SerializeField] private Button mageButton;
     [SerializeField] private Button elfButton;
 
+    [Header("Class Emblems")]
+    [SerializeField] private ClassEmblemButton knightEmblem;
+    [SerializeField] private ClassEmblemButton mageEmblem;
+    [SerializeField] private ClassEmblemButton elfEmblem;
+
     [Header("Settings")]
     [SerializeField] private string worldSceneName = "World";
     [SerializeField] private PlayerClass selectedClass = PlayerClass.Knight;
@@ -49,9 +54,6 @@ public class CharacterCreationFlow : MonoBehaviour
     private const string SaveFileExtension = ".bytes";
 
     private string SaveDir => Path.Combine(Application.persistentDataPath, SaveFolderRoot, SaveFolderCharacters);
-    private HoverEffect knightHover;
-    private HoverEffect mageHover;
-    private HoverEffect elfHover;
 
     private void Awake()
     {
@@ -114,7 +116,8 @@ public class CharacterCreationFlow : MonoBehaviour
         }
 
         selectedClass = PlayerClass.Knight;
-        CacheHoverEffects();
+        CacheEmblems();
+        ApplyClassHighlight();
         RefreshClassDescription();
 
         if (!previewRoot)
@@ -137,23 +140,21 @@ public class CharacterCreationFlow : MonoBehaviour
         RefreshClassDescription();
     }
 
-    private void Update()
+    private void CacheEmblems()
     {
-        ApplyClassHighlight();
-    }
-
-    private void CacheHoverEffects()
-    {
-        if (knightButton) knightHover = knightButton.GetComponentInChildren<HoverEffect>(true);
-        if (mageButton) mageHover = mageButton.GetComponentInChildren<HoverEffect>(true);
-        if (elfButton) elfHover = elfButton.GetComponentInChildren<HoverEffect>(true);
+        if (!knightEmblem && knightButton)
+            knightEmblem = knightButton.GetComponentInChildren<ClassEmblemButton>(true);
+        if (!mageEmblem && mageButton)
+            mageEmblem = mageButton.GetComponentInChildren<ClassEmblemButton>(true);
+        if (!elfEmblem && elfButton)
+            elfEmblem = elfButton.GetComponentInChildren<ClassEmblemButton>(true);
     }
 
     private void ApplyClassHighlight()
     {
-        if (knightHover) knightHover.isHover = selectedClass == PlayerClass.Knight;
-        if (mageHover) mageHover.isHover = selectedClass == PlayerClass.Mage;
-        if (elfHover) elfHover.isHover = selectedClass == PlayerClass.Elf;
+        if (knightEmblem) knightEmblem.SetSelected(selectedClass == PlayerClass.Knight);
+        if (mageEmblem) mageEmblem.SetSelected(selectedClass == PlayerClass.Mage);
+        if (elfEmblem) elfEmblem.SetSelected(selectedClass == PlayerClass.Elf);
     }
 
     public void SelectKnight()
@@ -161,7 +162,7 @@ public class CharacterCreationFlow : MonoBehaviour
         Debug.Log("CharacterCreationFlow: SelectKnight");
         selectedClass = PlayerClass.Knight;
         ApplyClassHighlight();
-        RefreshClassDescription();
+        if (classDescriptionPanel) classDescriptionPanel.SetKnight();
     }
 
     public void SelectMage()
@@ -169,7 +170,7 @@ public class CharacterCreationFlow : MonoBehaviour
         Debug.Log("CharacterCreationFlow: SelectMage");
         selectedClass = PlayerClass.Mage;
         ApplyClassHighlight();
-        RefreshClassDescription();
+        if (classDescriptionPanel) classDescriptionPanel.SetMage();
     }
 
     public void SelectElf()
@@ -177,7 +178,7 @@ public class CharacterCreationFlow : MonoBehaviour
         Debug.Log("CharacterCreationFlow: SelectElf");
         selectedClass = PlayerClass.Elf;
         ApplyClassHighlight();
-        RefreshClassDescription();
+        if (classDescriptionPanel) classDescriptionPanel.SetElf();
     }
 
     public void OpenCustomizer()
