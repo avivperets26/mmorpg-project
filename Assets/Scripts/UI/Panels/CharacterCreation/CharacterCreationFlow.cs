@@ -46,8 +46,27 @@ public class CharacterCreationFlow : MonoBehaviour
     [SerializeField] private GameObject knightPreview;
     [SerializeField] private GameObject magePreview;
     [SerializeField] private GameObject elfPreview;
-    [SerializeField, Range(0.1f, 1f)] private float previewDimBrightness = 0.35f;
-    [SerializeField, Range(0.5f, 1.5f)] private float previewSelectedBrightness = 1f;
+    [SerializeField] private Vector3 unselectedOffset = Vector3.zero;
+    [SerializeField] private Vector3 knightUnselectedOffset = new Vector3(-0.45f, 0f, 0.7f);
+    [SerializeField] private Vector3 mageUnselectedOffset = new Vector3(-1.3f, 0f, 0.7f);
+    [SerializeField] private Vector3 elfUnselectedOffset = new Vector3(0.2f, 0f, 0.7f);
+
+    [Header("Preview Lighting")]
+    [SerializeField] private Light knightPreviewLight;
+    [SerializeField] private Light magePreviewLight;
+    [SerializeField] private Light elfPreviewLight;
+    [SerializeField] private Light previewDirectionalLight;
+    [SerializeField, Range(0.1f, 2.5f)] private float previewDimLightIntensity = 0.25f;
+    [SerializeField, Range(0.1f, 3f)] private float previewSelectedLightIntensity = 1.2f;
+    [SerializeField, Range(0f, 2.5f)] private float previewDirectionalDimIntensity = 0.2f;
+    [SerializeField] private Vector3 previewLightLocalPosition = new Vector3(0f, 1.6f, 1.2f);
+    [SerializeField] private Vector3 previewLightLocalEuler = new Vector3(35f, 180f, 0f);
+    [SerializeField] private bool limitPreviewLightingToLayer = true;
+    [SerializeField, Range(0, 31)] private int previewLightingLayer = 1;
+    [SerializeField] private Light[] excludeFromPreviewLayer;
+    [SerializeField] private bool excludeAllSceneLights = true;
+    [SerializeField] private bool useUnselectedObjectLayer = true;
+    [SerializeField, Range(0, 31)] private int unselectedPreviewLayer = 2;
 
     [Header("Preview Presets")]
     [SerializeField] private string knightPresetPath = "MccBlueprints/Characters_bytes/knight_preset.bytes";
@@ -72,18 +91,25 @@ public class CharacterCreationFlow : MonoBehaviour
     private Renderer[] knightPreviewRenderers;
     private Renderer[] magePreviewRenderers;
     private Renderer[] elfPreviewRenderers;
+    private PreviewRendererState[] knightRendererStates;
+    private PreviewRendererState[] mageRendererStates;
+    private PreviewRendererState[] elfRendererStates;
+    private PreviewObjectLayerState[] knightObjectLayers;
+    private PreviewObjectLayerState[] mageObjectLayers;
+    private PreviewObjectLayerState[] elfObjectLayers;
     private CharacterEntity knightPreviewEntity;
     private CharacterEntity magePreviewEntity;
     private CharacterEntity elfPreviewEntity;
     private SoftKittyMcc.CharacterEntity elfPreviewEntityMcc;
-    private MaterialPropertyBlock previewBlock;
+    private Vector3 knightSelectedPosition;
+    private Vector3 mageSelectedPosition;
+    private Vector3 elfSelectedPosition;
 
     private string SaveDir => Path.Combine(Application.persistentDataPath, SaveFolderRoot, SaveFolderCharacters);
 
     private void Awake()
     {
         Debug.Log("CharacterCreationFlow: Awake");
-        previewBlock = new MaterialPropertyBlock();
         if (!characterEntity)
             Debug.LogError("CharacterCreationFlow: Missing CharacterEntity reference.");
         if (!frontPanelRoot)
@@ -144,6 +170,10 @@ public class CharacterCreationFlow : MonoBehaviour
         selectedClass = PlayerClass.Knight;
         CacheEmblems();
         CachePreviews();
+        CachePreviewLights();
+        ApplyPreviewLightLayers();
+        ApplyUnselectedLayerToSceneLights();
+        ApplyPreviewDirectionalLight();
         ResolveCharacterEntity();
         EnsurePreviewSex();
         ApplyClassHighlight();
@@ -174,6 +204,9 @@ public class CharacterCreationFlow : MonoBehaviour
     {
         yield return null;
         ApplyPreviewPresets();
+        yield return null;
+        RefreshPreviewCaches();
+        ApplyClassHighlight();
     }
 
     private void CacheEmblems()
@@ -198,19 +231,246 @@ public class CharacterCreationFlow : MonoBehaviour
         if (knightPreview)
         {
             knightPreviewRenderers = knightPreview.GetComponentsInChildren<Renderer>(true);
+            knightRendererStates = CacheRendererStates(knightPreviewRenderers);
+            knightObjectLayers = CacheObjectLayers(knightPreview);
             knightPreviewEntity = knightPreview.GetComponent<CharacterEntity>();
+            knightSelectedPosition = knightPreview.transform.localPosition;
         }
         if (magePreview)
         {
             magePreviewRenderers = magePreview.GetComponentsInChildren<Renderer>(true);
+            mageRendererStates = CacheRendererStates(magePreviewRenderers);
+            mageObjectLayers = CacheObjectLayers(magePreview);
             magePreviewEntity = magePreview.GetComponent<CharacterEntity>();
+            mageSelectedPosition = magePreview.transform.localPosition;
         }
         if (elfPreview)
         {
             elfPreviewRenderers = elfPreview.GetComponentsInChildren<Renderer>(true);
+            elfRendererStates = CacheRendererStates(elfPreviewRenderers);
+            elfObjectLayers = CacheObjectLayers(elfPreview);
             elfPreviewEntity = elfPreview.GetComponent<CharacterEntity>();
             elfPreviewEntityMcc = elfPreview.GetComponent<SoftKittyMcc.CharacterEntity>();
+            elfSelectedPosition = elfPreview.transform.localPosition;
         }
+    }
+
+    private void RefreshPreviewCaches()
+    {
+        RefreshPreviewCache(knightPreview, ref knightPreviewRenderers, ref knightRendererStates, ref knightObjectLayers);
+        RefreshPreviewCache(magePreview, ref magePreviewRenderers, ref mageRendererStates, ref mageObjectLayers);
+        RefreshPreviewCache(elfPreview, ref elfPreviewRenderers, ref elfRendererStates, ref elfObjectLayers);
+    }
+
+    private void RefreshPreviewCache(
+        GameObject preview,
+        ref Renderer[] renderers,
+        ref PreviewRendererState[] rendererStates,
+        ref PreviewObjectLayerState[] objectLayers)
+    {
+        if (!preview)
+            return;
+
+        renderers = preview.GetComponentsInChildren<Renderer>(true);
+        rendererStates = CacheRendererStates(renderers);
+        objectLayers = CacheObjectLayers(preview);
+    }
+
+    private void CachePreviewLights()
+    {
+        EnsurePreviewLight(knightPreview, ref knightPreviewLight, "PreviewLight_Knight");
+        EnsurePreviewLight(magePreview, ref magePreviewLight, "PreviewLight_Mage");
+        EnsurePreviewLight(elfPreview, ref elfPreviewLight, "PreviewLight_Elf");
+    }
+
+    private void ApplyPreviewLightLayers()
+    {
+        if (!limitPreviewLightingToLayer)
+            return;
+
+        var mask = 1u << previewLightingLayer;
+        SetLightRenderingLayer(knightPreviewLight, mask);
+        SetLightRenderingLayer(magePreviewLight, mask);
+        SetLightRenderingLayer(elfPreviewLight, mask);
+
+        if (excludeAllSceneLights)
+        {
+            var sceneLights = GetSceneLightsExcludingPreviews();
+            for (var i = 0; i < sceneLights.Length; i++)
+                RemoveLightLayer(sceneLights[i], mask);
+            return;
+        }
+
+        if (excludeFromPreviewLayer != null && excludeFromPreviewLayer.Length > 0)
+        {
+            for (var i = 0; i < excludeFromPreviewLayer.Length; i++)
+                RemoveLightLayer(excludeFromPreviewLayer[i], mask);
+            return;
+        }
+
+        RemoveLightLayer(RenderSettings.sun, mask);
+    }
+
+    private void ApplyUnselectedLayerToSceneLights()
+    {
+        if (!useUnselectedObjectLayer)
+            return;
+
+        var mask = 1 << unselectedPreviewLayer;
+        var sceneLights = GetSceneLightsExcludingPreviews();
+        for (var i = 0; i < sceneLights.Length; i++)
+            RemoveLightCullingLayer(sceneLights[i], mask);
+
+        RemoveLightCullingLayer(knightPreviewLight, mask);
+        RemoveLightCullingLayer(magePreviewLight, mask);
+        RemoveLightCullingLayer(elfPreviewLight, mask);
+        LogSceneLightMasks(mask, sceneLights);
+    }
+
+    private void ApplyPreviewDirectionalLight()
+    {
+        if (!previewDirectionalLight)
+            return;
+
+        previewDirectionalLight.intensity = previewDirectionalDimIntensity;
+
+        if (useUnselectedObjectLayer)
+            previewDirectionalLight.cullingMask = 1 << unselectedPreviewLayer;
+
+        if (limitPreviewLightingToLayer)
+            previewDirectionalLight.renderingLayerMask = (int)(1u << previewLightingLayer);
+    }
+
+    private static void RemoveLightCullingLayer(Light light, int mask)
+    {
+        if (!light)
+            return;
+
+        light.cullingMask &= ~mask;
+    }
+
+    private void LogSceneLightMasks(int unselectedMask, Light[] sceneLights)
+    {
+        if (sceneLights == null)
+            return;
+
+        for (var i = 0; i < sceneLights.Length; i++)
+        {
+            var light = sceneLights[i];
+            if (!light)
+                continue;
+
+            Debug.Log($"CharacterCreationFlow: Light '{light.name}' cullingMask=0x{light.cullingMask:X} removedLayer=0x{unselectedMask:X}");
+        }
+    }
+
+    private void LogPreviewLayerState()
+    {
+        if (!useUnselectedObjectLayer)
+            return;
+
+        LogPreviewLayerState("Knight", knightObjectLayers);
+        LogPreviewLayerState("Mage", mageObjectLayers);
+        LogPreviewLayerState("Elf", elfObjectLayers);
+    }
+
+    private void LogPreviewLayerState(string label, PreviewObjectLayerState[] states)
+    {
+        if (states == null || states.Length == 0)
+            return;
+
+        var transform = states[0].Transform;
+        if (!transform)
+            return;
+
+        Debug.Log($"CharacterCreationFlow: Preview '{label}' layer={transform.gameObject.layer} selectedClass={selectedClass}");
+    }
+
+    private static void SetPreviewRenderingLayer(Renderer[] renderers, uint mask)
+    {
+        if (renderers == null)
+            return;
+
+        for (var i = 0; i < renderers.Length; i++)
+        {
+            var renderer = renderers[i];
+            if (renderer)
+                renderer.renderingLayerMask = mask;
+        }
+    }
+
+    private static void SetLightRenderingLayer(Light previewLight, uint mask)
+    {
+        if (previewLight)
+            previewLight.renderingLayerMask = (int)mask;
+    }
+
+    private static void RemoveLightLayer(Light sceneLight, uint mask)
+    {
+        if (!sceneLight)
+            return;
+
+        sceneLight.renderingLayerMask &= (int)~mask;
+    }
+
+    private Light[] GetSceneLightsExcludingPreviews()
+    {
+#if UNITY_2023_1_OR_NEWER
+        var allLights = FindObjectsByType<Light>(FindObjectsSortMode.None);
+#else
+        var allLights = FindObjectsOfType<Light>();
+#endif
+        if (allLights == null || allLights.Length == 0)
+            return System.Array.Empty<Light>();
+
+        var result = new System.Collections.Generic.List<Light>(allLights.Length);
+        for (var i = 0; i < allLights.Length; i++)
+        {
+            var light = allLights[i];
+            if (!light)
+                continue;
+            if (light == knightPreviewLight || light == magePreviewLight || light == elfPreviewLight)
+                continue;
+            if (light == previewDirectionalLight)
+                continue;
+            result.Add(light);
+        }
+
+        return result.ToArray();
+    }
+
+    private void OnValidate()
+    {
+        if (!isActiveAndEnabled)
+            return;
+
+        ApplyPreviewLightLayers();
+        ApplyUnselectedLayerToSceneLights();
+        ApplyPreviewDirectionalLight();
+    }
+
+    private void EnsurePreviewLight(GameObject preview, ref Light previewLight, string fallbackName)
+    {
+        if (!preview)
+            return;
+
+        if (!previewLight)
+            previewLight = preview.GetComponentInChildren<Light>(true);
+
+        if (!previewLight)
+        {
+            var lightObject = new GameObject(fallbackName);
+            lightObject.transform.SetParent(preview.transform, false);
+            previewLight = lightObject.AddComponent<Light>();
+            previewLight.type = LightType.Spot;
+            previewLight.range = 8f;
+            previewLight.spotAngle = 80f;
+            previewLight.shadows = LightShadows.None;
+        }
+
+        previewLight.transform.localPosition = previewLightLocalPosition;
+        previewLight.transform.localRotation = Quaternion.Euler(previewLightLocalEuler);
+        previewLight.intensity = previewSelectedLightIntensity;
     }
 
     private void ResolveCharacterEntity()
@@ -300,30 +560,133 @@ public class CharacterCreationFlow : MonoBehaviour
 
     private void ApplyPreviewHighlight()
     {
-        SetPreviewBrightness(knightPreviewRenderers, selectedClass == PlayerClass.Knight);
-        SetPreviewBrightness(magePreviewRenderers, selectedClass == PlayerClass.Mage);
-        SetPreviewBrightness(elfPreviewRenderers, selectedClass == PlayerClass.Elf);
+        if (limitPreviewLightingToLayer)
+        {
+            var mask = 1u << previewLightingLayer;
+            SetPreviewRenderingLayerForSelection(knightRendererStates, selectedClass == PlayerClass.Knight, mask);
+            SetPreviewRenderingLayerForSelection(mageRendererStates, selectedClass == PlayerClass.Mage, mask);
+            SetPreviewRenderingLayerForSelection(elfRendererStates, selectedClass == PlayerClass.Elf, mask);
+        }
+        if (useUnselectedObjectLayer)
+        {
+            SetPreviewObjectLayerForSelection(knightObjectLayers, selectedClass == PlayerClass.Knight, unselectedPreviewLayer);
+            SetPreviewObjectLayerForSelection(mageObjectLayers, selectedClass == PlayerClass.Mage, unselectedPreviewLayer);
+            SetPreviewObjectLayerForSelection(elfObjectLayers, selectedClass == PlayerClass.Elf, unselectedPreviewLayer);
+        }
+        SetPreviewLight(knightPreviewLight, selectedClass == PlayerClass.Knight);
+        SetPreviewLight(magePreviewLight, selectedClass == PlayerClass.Mage);
+        SetPreviewLight(elfPreviewLight, selectedClass == PlayerClass.Elf);
+        SetPreviewPosition(knightPreview, knightSelectedPosition, knightUnselectedOffset, selectedClass == PlayerClass.Knight);
+        SetPreviewPosition(magePreview, mageSelectedPosition, mageUnselectedOffset, selectedClass == PlayerClass.Mage);
+        SetPreviewPosition(elfPreview, elfSelectedPosition, elfUnselectedOffset, selectedClass == PlayerClass.Elf);
+        LogPreviewLayerState();
     }
 
-    private void SetPreviewBrightness(Renderer[] renderers, bool isSelected)
+    private void SetPreviewPosition(GameObject preview, Vector3 selectedPosition, Vector3 specificOffset, bool isSelected)
     {
-        if (renderers == null || renderers.Length == 0)
+        if (!preview)
             return;
 
-        var brightness = isSelected ? previewSelectedBrightness : previewDimBrightness;
-        var tint = new Color(brightness, brightness, brightness, 1f);
+        var offset = specificOffset == Vector3.zero ? unselectedOffset : specificOffset;
+        preview.transform.localPosition = isSelected ? selectedPosition : selectedPosition + offset;
+    }
 
+    private struct PreviewRendererState
+    {
+        public Renderer Renderer;
+        public uint RenderingLayerMask;
+    }
+
+    private struct PreviewObjectLayerState
+    {
+        public Transform Transform;
+        public int OriginalLayer;
+    }
+
+    private static PreviewRendererState[] CacheRendererStates(Renderer[] renderers)
+    {
+        if (renderers == null || renderers.Length == 0)
+            return null;
+
+        var states = new PreviewRendererState[renderers.Length];
         for (var i = 0; i < renderers.Length; i++)
         {
             var renderer = renderers[i];
             if (!renderer)
                 continue;
 
-            renderer.GetPropertyBlock(previewBlock);
-            previewBlock.SetColor("_Color", tint);
-            previewBlock.SetColor("_BaseColor", tint);
-            renderer.SetPropertyBlock(previewBlock);
+            states[i] = new PreviewRendererState
+            {
+                Renderer = renderer,
+                RenderingLayerMask = renderer.renderingLayerMask
+            };
         }
+
+        return states;
+    }
+
+    private static PreviewObjectLayerState[] CacheObjectLayers(GameObject preview)
+    {
+        if (!preview)
+            return null;
+
+        var transforms = preview.GetComponentsInChildren<Transform>(true);
+        if (transforms == null || transforms.Length == 0)
+            return null;
+
+        var states = new PreviewObjectLayerState[transforms.Length];
+        for (var i = 0; i < transforms.Length; i++)
+        {
+            var transform = transforms[i];
+            if (!transform)
+                continue;
+
+            states[i] = new PreviewObjectLayerState
+            {
+                Transform = transform,
+                OriginalLayer = transform.gameObject.layer
+            };
+        }
+
+        return states;
+    }
+
+    private static void SetPreviewObjectLayerForSelection(PreviewObjectLayerState[] states, bool isSelected, int unselectedLayer)
+    {
+        if (states == null || states.Length == 0)
+            return;
+
+        for (var i = 0; i < states.Length; i++)
+        {
+            var state = states[i];
+            if (!state.Transform)
+                continue;
+
+            state.Transform.gameObject.layer = isSelected ? state.OriginalLayer : unselectedLayer;
+        }
+    }
+
+    private static void SetPreviewRenderingLayerForSelection(PreviewRendererState[] states, bool isSelected, uint unselectedMask)
+    {
+        if (states == null || states.Length == 0)
+            return;
+
+        for (var i = 0; i < states.Length; i++)
+        {
+            var state = states[i];
+            if (!state.Renderer)
+                continue;
+
+            state.Renderer.renderingLayerMask = isSelected ? state.RenderingLayerMask : unselectedMask;
+        }
+    }
+
+    private void SetPreviewLight(Light previewLight, bool isSelected)
+    {
+        if (!previewLight)
+            return;
+
+        previewLight.intensity = isSelected ? previewSelectedLightIntensity : previewDimLightIntensity;
     }
 
     public void SelectKnight()
