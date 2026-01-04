@@ -324,7 +324,6 @@ public class CharacterCreationFlow : MonoBehaviour
         RemoveLightCullingLayer(knightPreviewLight, mask);
         RemoveLightCullingLayer(magePreviewLight, mask);
         RemoveLightCullingLayer(elfPreviewLight, mask);
-        LogSceneLightMasks(mask, sceneLights);
     }
 
     private void ApplyPreviewDirectionalLight()
@@ -349,42 +348,6 @@ public class CharacterCreationFlow : MonoBehaviour
         light.cullingMask &= ~mask;
     }
 
-    private void LogSceneLightMasks(int unselectedMask, Light[] sceneLights)
-    {
-        if (sceneLights == null)
-            return;
-
-        for (var i = 0; i < sceneLights.Length; i++)
-        {
-            var light = sceneLights[i];
-            if (!light)
-                continue;
-
-            Debug.Log($"CharacterCreationFlow: Light '{light.name}' cullingMask=0x{light.cullingMask:X} removedLayer=0x{unselectedMask:X}");
-        }
-    }
-
-    private void LogPreviewLayerState()
-    {
-        if (!useUnselectedObjectLayer)
-            return;
-
-        LogPreviewLayerState("Knight", knightObjectLayers);
-        LogPreviewLayerState("Mage", mageObjectLayers);
-        LogPreviewLayerState("Elf", elfObjectLayers);
-    }
-
-    private void LogPreviewLayerState(string label, PreviewObjectLayerState[] states)
-    {
-        if (states == null || states.Length == 0)
-            return;
-
-        var transform = states[0].Transform;
-        if (!transform)
-            return;
-
-        Debug.Log($"CharacterCreationFlow: Preview '{label}' layer={transform.gameObject.layer} selectedClass={selectedClass}");
-    }
 
     private static void SetPreviewRenderingLayer(Renderer[] renderers, uint mask)
     {
@@ -579,7 +542,6 @@ public class CharacterCreationFlow : MonoBehaviour
         SetPreviewPosition(knightPreview, knightSelectedPosition, knightUnselectedOffset, selectedClass == PlayerClass.Knight);
         SetPreviewPosition(magePreview, mageSelectedPosition, mageUnselectedOffset, selectedClass == PlayerClass.Mage);
         SetPreviewPosition(elfPreview, elfSelectedPosition, elfUnselectedOffset, selectedClass == PlayerClass.Elf);
-        LogPreviewLayerState();
     }
 
     private void SetPreviewPosition(GameObject preview, Vector3 selectedPosition, Vector3 specificOffset, bool isSelected)
