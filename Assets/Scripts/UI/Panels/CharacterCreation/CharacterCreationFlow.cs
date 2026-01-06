@@ -10,8 +10,10 @@
 // - Customize button (if present): OnClick -> OpenCustomizer.
 // - Customizer "Create Character" button: OnClick -> CreateCharacter.
 // Persistent folder: <persistentDataPath>/MccBlueprints/Characters
+using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using Game.CharacterCreator;
@@ -65,6 +67,17 @@ public class CharacterCreationFlow : MonoBehaviour
     [SerializeField, Range(0, 31)] private int previewLightingLayer = 1;
     [SerializeField] private Light[] excludeFromPreviewLayer;
     [SerializeField] private bool excludeAllSceneLights = true;
+    [Header("Customizer Lighting")]
+    [SerializeField] private bool disableCustomizerShadows = true;
+    [SerializeField] private bool forceSunCullingMaskEverything = true;
+    [SerializeField, Range(0f, 2f)] private float customizerSunIntensity = 1f;
+    [SerializeField] private Light customizerSunLight;
+    [SerializeField] private string customizerSunLightName = "Directional Light";
+    private bool previewDirectionalCached;
+    private float previewDirectionalOriginalIntensity;
+    private int previewDirectionalOriginalCullingMask;
+    private int previewDirectionalOriginalRenderingMask;
+    private readonly Dictionary<Light, LightDefaults> customizerLightDefaults = new Dictionary<Light, LightDefaults>();
     [SerializeField] private bool useUnselectedObjectLayer = true;
     [SerializeField, Range(0, 31)] private int unselectedPreviewLayer = 2;
 
@@ -171,6 +184,7 @@ public class CharacterCreationFlow : MonoBehaviour
         CacheEmblems();
         CachePreviews();
         CachePreviewLights();
+        CachePreviewDirectionalDefaults();
         ApplyPreviewLightLayers();
         ApplyUnselectedLayerToSceneLights();
         ApplyPreviewDirectionalLight();
@@ -283,6 +297,38 @@ public class CharacterCreationFlow : MonoBehaviour
         EnsurePreviewLight(elfPreview, ref elfPreviewLight, "PreviewLight_Elf");
     }
 
+    private void CachePreviewDirectionalDefaults()
+    {
+        if (!previewDirectionalLight || previewDirectionalCached)
+            return;
+
+        previewDirectionalOriginalIntensity = previewDirectionalLight.intensity;
+        previewDirectionalOriginalCullingMask = previewDirectionalLight.cullingMask;
+        previewDirectionalOriginalRenderingMask = previewDirectionalLight.renderingLayerMask;
+        previewDirectionalCached = true;
+    }
+
+    private void CacheCustomizerLightDefaults()
+    {
+        if (customizerLightDefaults.Count > 0)
+            return;
+
+        foreach (var light in EnumerateCustomizerDirectionalLights())
+        {
+            if (!light)
+                continue;
+            if (customizerLightDefaults.ContainsKey(light))
+                continue;
+
+            customizerLightDefaults.Add(light, new LightDefaults
+            {
+                Intensity = light.intensity,
+                CullingMask = light.cullingMask,
+                RenderingLayerMask = light.renderingLayerMask
+            });
+        }
+    }
+
     private void ApplyPreviewLightLayers()
     {
         if (!limitPreviewLightingToLayer)
@@ -308,7 +354,8 @@ public class CharacterCreationFlow : MonoBehaviour
             return;
         }
 
-        RemoveLightLayer(RenderSettings.sun, mask);
+        if (customizerSunLight)
+            RemoveLightLayer(customizerSunLight, mask);
     }
 
     private void ApplyUnselectedLayerToSceneLights()
@@ -338,6 +385,51 @@ public class CharacterCreationFlow : MonoBehaviour
 
         if (limitPreviewLightingToLayer)
             previewDirectionalLight.renderingLayerMask = (int)(1u << previewLightingLayer);
+    }
+
+    private void RestoreSceneLightingForCustomizer()
+    {
+        var mask = 1u << previewLightingLayer;
+        var unselectedMask = 1 << unselectedPreviewLayer;
+        var sceneLights = GetSceneLightsExcludingPreviews();
+        for (var i = 0; i < sceneLights.Length; i++)
+        {
+            var light = sceneLights[i];
+            if (!light)
+                continue;
+            light.renderingLayerMask |= (int)mask;
+            light.cullingMask |= unselectedMask;
+        }
+
+        ApplyCustomizerSunLighting(mask, unselectedMask);
+
+        if (previewDirectionalLight)
+        {
+            previewDirectionalLight.intensity = customizerSunIntensity;
+            previewDirectionalLight.cullingMask = forceSunCullingMaskEverything ? ~0 : previewDirectionalOriginalCullingMask;
+            previewDirectionalLight.renderingLayerMask = forceSunCullingMaskEverything ? -1 : previewDirectionalOriginalRenderingMask;
+        }
+    }
+
+    private void ApplyCustomizerShadowSettings(CharacterCusUI customizer)
+    {
+        if (!disableCustomizerShadows || customizer == null)
+            return;
+
+        var character = customizer.MyCharacter;
+        if (!character)
+            return;
+
+        var renderers = character.GetComponentsInChildren<Renderer>(true);
+        for (var i = 0; i < renderers.Length; i++)
+        {
+            var renderer = renderers[i];
+            if (!renderer)
+                continue;
+
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+        }
     }
 
     private static void RemoveLightCullingLayer(Light light, int mask)
@@ -694,6 +786,8 @@ public class CharacterCreationFlow : MonoBehaviour
         if (customizationRoot) customizationRoot.SetActive(true);
         Debug.Log($"CharacterCreationFlow: frontPanelRoot active={frontPanelRoot.activeSelf}, customizationRoot active={customizationRoot.activeSelf}");
 
+        RestoreSceneLightingForCustomizer();
+
         if (TryOpenEmbeddedCustomizer())
         {
             SetPreviewVisible(false);
@@ -728,12 +822,10 @@ public class CharacterCreationFlow : MonoBehaviour
             return false;
         }
 
-        if (characterEntity.mCharacterAppearance == null)
-            characterEntity.ResetCharacter();
-
-        var appearance = characterEntity.mCharacterAppearance ?? new CharacterAppearance(CharacterData.Create((byte)Sex.Male));
-        NormalizeAppearance(appearance);
+        var appearance = BuildCustomizerAppearance();
         CharacterCusUI.InitialData = appearance.Copy();
+        if (characterEntity)
+            characterEntity.mCharacterAppearance = appearance.Copy();
         CharacterCusUI.SaveRootPath = CharacterManager.instance.BlueprintPath;
         CharacterCusUI.SaveFormat = SaveMethod.PngFile;
         CharacterCusUI.Settings = new CharacterCusSetting()
@@ -765,7 +857,17 @@ public class CharacterCreationFlow : MonoBehaviour
                 Game.CharacterCreator.CameraControl.instance.Initialized = true;
         }
 
+        ApplyCustomizerShadowSettings(customizer);
+
         return true;
+    }
+
+    private CharacterAppearance BuildCustomizerAppearance()
+    {
+        var targetSex = selectedClass == PlayerClass.Elf ? Sex.Female : Sex.Male;
+        var appearance = new CharacterAppearance(CharacterData.Create((byte)targetSex));
+        NormalizeAppearance(appearance);
+        return appearance;
     }
 
     private void SetPreviewVisible(bool isVisible)
@@ -897,6 +999,111 @@ public class CharacterCreationFlow : MonoBehaviour
         if (customizationRoot) customizationRoot.SetActive(false);
         if (frontPanelRoot) frontPanelRoot.SetActive(true);
         SetPreviewVisible(true);
+        RestoreSunDefaults();
+        ApplyPreviewLightLayers();
+        ApplyUnselectedLayerToSceneLights();
+        ApplyPreviewDirectionalLight();
+    }
+
+    private void RestoreSunDefaults()
+    {
+        if (customizerLightDefaults.Count == 0)
+            return;
+
+        foreach (var kvp in customizerLightDefaults)
+        {
+            if (!kvp.Key)
+                continue;
+            kvp.Key.intensity = kvp.Value.Intensity;
+            kvp.Key.cullingMask = kvp.Value.CullingMask;
+            kvp.Key.renderingLayerMask = kvp.Value.RenderingLayerMask;
+        }
+
+        customizerLightDefaults.Clear();
+    }
+
+    private void ApplyCustomizerSunLighting(uint previewMask, int unselectedMask)
+    {
+        CacheCustomizerLightDefaults();
+
+        var appliedCount = 0;
+        foreach (var light in EnumerateCustomizerDirectionalLights())
+        {
+            if (!light)
+                continue;
+
+            light.renderingLayerMask |= (int)previewMask;
+            light.cullingMask |= unselectedMask;
+
+            if (forceSunCullingMaskEverything)
+            {
+                light.cullingMask = ~0;
+                light.renderingLayerMask = -1;
+            }
+
+            light.intensity = customizerSunIntensity;
+            appliedCount++;
+        }
+
+        if (appliedCount == 0)
+            Debug.LogWarning("CharacterCreationFlow: No directional lights found to apply customizer lighting.");
+    }
+
+    private IEnumerable<Light> EnumerateCustomizerDirectionalLights()
+    {
+        if (customizerSunLight)
+        {
+            yield return customizerSunLight;
+            yield break;
+        }
+
+        var namedLight = ResolveDirectionalLightByName(customizerSunLightName);
+        if (namedLight)
+            yield return namedLight;
+
+        var fallbackNames = new[] { "_ENV/Directional Light", "Sun" };
+        for (var i = 0; i < fallbackNames.Length; i++)
+        {
+            if (namedLight && namedLight.name == fallbackNames[i])
+                continue;
+            var fallback = ResolveDirectionalLightByName(fallbackNames[i]);
+            if (fallback)
+                yield return fallback;
+        }
+
+        var lights = FindObjectsByType<Light>(FindObjectsSortMode.None);
+        for (var i = 0; i < lights.Length; i++)
+        {
+            var light = lights[i];
+            if (!light || light.type != LightType.Directional)
+                continue;
+            if (light == previewDirectionalLight)
+                continue;
+            yield return light;
+        }
+    }
+
+    private Light ResolveDirectionalLightByName(string lightName)
+    {
+        if (string.IsNullOrWhiteSpace(lightName))
+            return null;
+
+        var obj = GameObject.Find(lightName);
+        if (!obj)
+            return null;
+
+        var light = obj.GetComponent<Light>();
+        if (!light || light.type != LightType.Directional)
+            return null;
+
+        return light;
+    }
+
+    private struct LightDefaults
+    {
+        public float Intensity;
+        public int CullingMask;
+        public int RenderingLayerMask;
     }
 
     public void CreateCharacter()
