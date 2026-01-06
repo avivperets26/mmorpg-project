@@ -42,6 +42,16 @@ public class PlayerController : MonoBehaviour
     [Tooltip("Animator state for basic locomotion (idle/walk/run blend tree). Set this to your locomotion state name.")]
     public string locomotionState = "Locomotion"; // <-- set in Inspector to your actual locomotion state
 
+    [Header("Start Sequence")]
+    [Tooltip("If enabled, player starts in a locked pose until the start animation completes.")]
+    [SerializeField] private bool useStartSequence = true;
+    [Tooltip("Animator state name (or full path) for the start pose state.")]
+    [SerializeField] private string startPoseStateName = "StartPose";
+    [Tooltip("Animator state name (or full path) for the start animation state.")]
+    [SerializeField] private string startAnimStateName = "StartSequence";
+    [Tooltip("Animator trigger parameter that starts the sequence.")]
+    [SerializeField] private string startSequenceTrigger = "StartSequence";
+
     [System.Serializable]
     private struct AnimatorStanceConfig
     {
@@ -110,6 +120,12 @@ public class PlayerController : MonoBehaviour
     public float stopDistance = 0.15f;       // Distance to consider arrival
     public float faceMouseMaxDistance = 100f;
 
+    [Header("Spawn Grounding")]
+    [Tooltip("Max vertical distance to search for ground on spawn.")]
+    [SerializeField] private float spawnGroundCheckDistance = 200f;
+    [Tooltip("Small offset above ground to avoid initial clipping.")]
+    [SerializeField] private float spawnGroundOffset = 0.02f;
+
     [Header("Stamina / Shield / Sprint")]
     [Tooltip("Stamina drained per second while shield is held up.")]
     public float shieldStaminaPerSecond = 25f;
@@ -132,6 +148,9 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float combatFadeTime = 5f;
     private float combatTimer;
     private Animator animator;
+    [Header("Combat Pose")]
+    [Tooltip("Force combat pose when no safe zones are implemented yet.")]
+    [SerializeField] private bool forceCombatPose = true;
 
     // Components / state
     private CharacterController cc;
@@ -190,6 +209,16 @@ public class PlayerController : MonoBehaviour
     private string lastAttackStateName;
     private string lastAttackStatePath;
 
+    // Start sequence (locked pose -> start animation)
+    private bool startSequenceTriggered = false;
+    private bool startSequenceComplete = false;
+    private bool hasDeferredStartMove = false;
+    private Vector3 deferredClickTarget;
+    private IDamageable deferredAttackTarget;
+    private Vector3 deferredAttackHitPoint;
+    private bool deferredAutoAttackOnArrival;
+    private IInteractable deferredInteractable;
+
     // -----------------------------------------------------------------------
 
     void Awake()
@@ -210,7 +239,14 @@ public class PlayerController : MonoBehaviour
 
     private void Start()
     {
-        RefreshAnimatorStance(forceCrossfade: true);
+        RefreshAnimatorStance(forceCrossfade: !useStartSequence);
+        if (animator) animator.SetBool("IsCombat", false);
+        startSequenceComplete = !useStartSequence;
+        SnapToGroundOnSpawn();
+        if (forceCombatPose && startSequenceComplete)
+        {
+            SetCombatPoseLocked();
+        }
     }
 
     void Update()
@@ -374,10 +410,44 @@ public class PlayerController : MonoBehaviour
             }
         }
 
+        if (useStartSequence && !startSequenceComplete && !startSequenceTriggered)
+        {
+            if (hasClickTarget || pendingAttackTarget != null || pendingInteractable != null)
+            {
+                CacheDeferredStartMove();
+                TriggerStartSequence();
+            }
+        }
+
         ApplyGravity();
 
         if (attackInputLockTimer > 0f)
             attackInputLockTimer = Mathf.Max(0f, attackInputLockTimer - Time.deltaTime);
+
+        if (useStartSequence && !startSequenceComplete)
+        {
+            if (!startSequenceTriggered && !IsInStartSequenceStates())
+            {
+                startSequenceComplete = true;
+            }
+            else
+            {
+                if (startSequenceTriggered && !IsInStartSequenceStates())
+                {
+                    startSequenceComplete = true;
+                    RestoreDeferredStartMove();
+                    if (forceCombatPose)
+                    {
+                        SetCombatPoseLocked();
+                    }
+                }
+
+                if (IsStartSequenceActive())
+                {
+                    return;
+                }
+            }
+        }
 
         // --- Shield stamina drain ---
         if (shieldHeld && stats != null)
@@ -603,7 +673,7 @@ public class PlayerController : MonoBehaviour
         }
 
         // --- simple auto-exit combat pose ---
-        if (isInCombat)
+        if (isInCombat && !forceCombatPose)
         {
             combatTimer -= Time.deltaTime;
             if (combatTimer <= 0f)
@@ -624,6 +694,105 @@ public class PlayerController : MonoBehaviour
     {
         // All stances live on base layer (index 0) in this controller.
         return 0;
+    }
+
+    private bool IsStartSequenceActive()
+    {
+        if (!useStartSequence || startSequenceComplete || animator == null)
+            return false;
+
+        if (!startSequenceTriggered)
+            return true;
+
+        return IsInStartSequenceStates();
+    }
+
+    private bool IsInStartSequenceStates()
+    {
+        if (animator == null) return false;
+        int layer = 0;
+        var info = animator.GetCurrentAnimatorStateInfo(layer);
+        var next = animator.GetNextAnimatorStateInfo(layer);
+
+        bool inState = IsAnimatorState(info, startPoseStateName) || IsAnimatorState(info, startAnimStateName);
+        bool inNext = animator.IsInTransition(layer) &&
+                      (IsAnimatorState(next, startPoseStateName) || IsAnimatorState(next, startAnimStateName));
+        return inState || inNext;
+    }
+
+    private static bool IsAnimatorState(AnimatorStateInfo info, string stateName)
+    {
+        if (string.IsNullOrWhiteSpace(stateName)) return false;
+        if (info.IsName(stateName)) return true;
+        return info.IsName($"Base Layer.{stateName}");
+    }
+
+    private void TriggerStartSequence()
+    {
+        if (startSequenceTriggered || animator == null)
+            return;
+
+        startSequenceTriggered = true;
+        animator.ResetTrigger(startSequenceTrigger);
+        animator.SetTrigger(startSequenceTrigger);
+    }
+
+    private void SnapToGroundOnSpawn()
+    {
+        if (!cc) return;
+
+        Vector3 origin = transform.position + Vector3.up * 2f;
+        if (Physics.Raycast(
+                origin,
+                Vector3.down,
+                out RaycastHit hit,
+                spawnGroundCheckDistance,
+                groundMask,
+                QueryTriggerInteraction.Ignore))
+        {
+            Vector3 targetPos = hit.point + Vector3.up * Mathf.Max(0f, spawnGroundOffset);
+            bool wasEnabled = cc.enabled;
+            cc.enabled = false;
+            transform.position = targetPos;
+            cc.enabled = wasEnabled;
+        }
+    }
+
+    private void CacheDeferredStartMove()
+    {
+        if (!hasClickTarget && pendingAttackTarget == null && pendingInteractable == null)
+            return;
+
+        hasDeferredStartMove = true;
+        deferredClickTarget = clickTargetWorld;
+        deferredAttackTarget = pendingAttackTarget;
+        deferredAttackHitPoint = pendingAttackHitPoint;
+        deferredAutoAttackOnArrival = autoAttackOnArrival;
+        deferredInteractable = pendingInteractable;
+
+        // Clear live movement while the start sequence runs.
+        hasClickTarget = false;
+        pendingAttackTarget = null;
+        pendingInteractable = null;
+        autoAttackOnArrival = false;
+    }
+
+    private void RestoreDeferredStartMove()
+    {
+        if (!hasDeferredStartMove)
+            return;
+
+        clickTargetWorld = deferredClickTarget;
+        hasClickTarget = true;
+        pendingAttackTarget = deferredAttackTarget;
+        pendingAttackHitPoint = deferredAttackHitPoint;
+        autoAttackOnArrival = deferredAutoAttackOnArrival;
+        pendingInteractable = deferredInteractable;
+
+        hasDeferredStartMove = false;
+        deferredAttackTarget = null;
+        deferredInteractable = null;
+        deferredAutoAttackOnArrival = false;
     }
 
     private string GetAnimatorStatePath(WeaponStance stance, string stateShortName)
@@ -796,6 +965,17 @@ public class PlayerController : MonoBehaviour
 
     private static bool IsShieldItem(ItemDefinition def) =>
         def != null && (def.category == ItemCategory.Shield || def.subtype == ItemSubtype.Shield);
+
+    private void SetCombatPoseLocked()
+    {
+        isInCombat = true;
+        combatTimer = float.MaxValue;
+        if (animator)
+        {
+            animator.SetBool("IsCombat", true);
+        }
+        RefreshAnimatorStance(forceCrossfade: true);
+    }
 
     // Auto attack trigger (animation + delayed hit)
     private void TriggerAutoAttack()
@@ -1242,6 +1422,8 @@ public class PlayerController : MonoBehaviour
     // Space: directional dodge
     public void OnDodge(InputAction.CallbackContext ctx)
     {
+        if (IsStartSequenceActive()) return;
+
         if (!ctx.performed || isDodging || dodgeOnCooldown)
             return;
 
@@ -1280,6 +1462,7 @@ public class PlayerController : MonoBehaviour
     // Alt + LMB: basic auto attack in place (Action: BasicAttack)
     public void OnBasicAttack(InputAction.CallbackContext ctx)
     {
+        if (IsStartSequenceActive()) return;
         if (!ctx.performed) return;
 
         // Require Alt to be held for the in-place attack override.
@@ -1312,6 +1495,7 @@ public class PlayerController : MonoBehaviour
     // RMB / future special ability (Action: AbilityAttack)
     public void OnAbilityAttack(InputAction.CallbackContext ctx)
     {
+        if (IsStartSequenceActive()) return;
         if (!ctx.performed) return;
 
         bool hasDmg = TryGetDamageableFromMouse(out var dmg, out var hitPoint);
@@ -1338,6 +1522,7 @@ public class PlayerController : MonoBehaviour
     // Clean “cancel attack” input (Action: AttackCancel)
     public void OnAttackCancel(InputAction.CallbackContext ctx)
     {
+        if (IsStartSequenceActive()) return;
         if (!ctx.performed) return;
 
         // Here we also drop combat pose if you want
@@ -1356,6 +1541,7 @@ public class PlayerController : MonoBehaviour
     // Left Shift: Shield up / down (Action: Shield)
     public void OnShield(InputAction.CallbackContext ctx)
     {
+        if (IsStartSequenceActive()) return;
         if (ctx.started)
         {
             if (stats != null && stats.CurrentStamina >= minStaminaToRaiseShield)
@@ -1399,6 +1585,7 @@ public class PlayerController : MonoBehaviour
     // R: Parry (Action: Parry)
     public void OnParry(InputAction.CallbackContext ctx)
     {
+        if (IsStartSequenceActive()) return;
         if (!ctx.performed) return;
 
         if (!shieldHeld)
