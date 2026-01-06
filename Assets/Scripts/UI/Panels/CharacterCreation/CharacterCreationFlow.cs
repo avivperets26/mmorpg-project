@@ -19,6 +19,10 @@ using UnityEngine.UI;
 using Game.CharacterCreator;
 using SoftKitty;
 using SoftKittyMcc = SoftKitty.MasterCharacterCreator;
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEditor.SceneManagement;
+#endif
 
 public class CharacterCreationFlow : MonoBehaviour
 {
@@ -32,6 +36,7 @@ public class CharacterCreationFlow : MonoBehaviour
     [SerializeField] private GameObject frontPanelRoot;          // CC_UI/FrontPanel
     [SerializeField] private UnityEngine.UI.InputField nameInput;
     [SerializeField] private Button customizeButton;
+    [SerializeField] private Button classSelectButton;
     [SerializeField] private GameObject previewRoot;             // Optional root for preview characters
 
     [Header("Class Buttons")]
@@ -169,6 +174,8 @@ public class CharacterCreationFlow : MonoBehaviour
             customizeButton.onClick.AddListener(OpenCustomizer);
         }
 
+        EnsureClassSelectButton();
+
         var frontName = frontPanelRoot ? frontPanelRoot.transform.Find("NameInput") : null;
         if (frontName)
             frontName.gameObject.SetActive(false);
@@ -195,6 +202,158 @@ public class CharacterCreationFlow : MonoBehaviour
 
         if (!previewRoot)
             previewRoot = GameObject.Find("PreviewCharacters");
+    }
+
+    private void OnValidate()
+    {
+        if (Application.isPlaying)
+            return;
+
+        EnsureClassSelectButton();
+
+        if (!isActiveAndEnabled)
+            return;
+
+        ApplyPreviewLightLayers();
+        ApplyUnselectedLayerToSceneLights();
+        ApplyPreviewDirectionalLight();
+    }
+
+    private void EnsureClassSelectButton()
+    {
+        if (!customizationRoot)
+            return;
+
+        if (!classSelectButton)
+        {
+            var existing = customizationRoot.transform.Find("Btn_ClassSelect");
+            if (existing)
+            {
+                classSelectButton = existing.GetComponent<Button>();
+                SetupClassSelectButton(existing.gameObject);
+                return;
+            }
+        }
+
+        if (classSelectButton)
+            return;
+
+        var createButtonTransform = customizationRoot.transform.Find("Btn_CreateCharacter");
+        if (!createButtonTransform)
+        {
+            var buttons = customizationRoot.GetComponentsInChildren<Button>(true);
+            for (var i = 0; i < buttons.Length; i++)
+            {
+                if (buttons[i] && buttons[i].name == "Btn_CreateCharacter")
+                {
+                    createButtonTransform = buttons[i].transform;
+                    break;
+                }
+            }
+        }
+
+        if (!createButtonTransform)
+        {
+            Debug.LogWarning("CharacterCreationFlow: Btn_CreateCharacter not found; cannot create Class Select button.");
+            return;
+        }
+
+#if UNITY_EDITOR
+        GameObject newButtonObj;
+        if (!Application.isPlaying)
+        {
+            newButtonObj = PrefabUtility.InstantiatePrefab(createButtonTransform.gameObject, createButtonTransform.parent) as GameObject;
+            if (newButtonObj == null)
+                newButtonObj = Instantiate(createButtonTransform.gameObject, createButtonTransform.parent);
+            Undo.RegisterCreatedObjectUndo(newButtonObj, "Create Class Select Button");
+            EditorSceneManager.MarkSceneDirty(newButtonObj.scene);
+        }
+        else
+        {
+            newButtonObj = Instantiate(createButtonTransform.gameObject, createButtonTransform.parent);
+        }
+#else
+        var newButtonObj = Instantiate(createButtonTransform.gameObject, createButtonTransform.parent);
+#endif
+        newButtonObj.name = "Btn_ClassSelect";
+        classSelectButton = newButtonObj.GetComponent<Button>();
+        SetupClassSelectButton(newButtonObj);
+    }
+
+    private void SetupClassSelectButton(GameObject newButtonObj)
+    {
+        if (!newButtonObj)
+            return;
+
+        if (classSelectButton)
+        {
+            classSelectButton.onClick = new Button.ButtonClickedEvent();
+            classSelectButton.onClick.AddListener(BackToClassSelect);
+        }
+
+        var rect = newButtonObj.GetComponent<RectTransform>();
+        if (rect)
+        {
+            rect.anchorMin = new Vector2(0f, 0f);
+            rect.anchorMax = new Vector2(0f, 0f);
+            rect.pivot = new Vector2(0f, 0f);
+            rect.anchoredPosition = new Vector2(14.8f, 12.6f);
+        }
+
+        var textTransform = newButtonObj.transform.Find("Text");
+        if (textTransform)
+        {
+            var text = textTransform.GetComponent<Text>();
+            if (text)
+                text.text = "Class Select";
+
+            var textRect = textTransform.GetComponent<RectTransform>();
+            if (textRect)
+            {
+                var pos = textRect.anchoredPosition;
+                textRect.anchoredPosition = new Vector2(18f, pos.y);
+            }
+        }
+
+        var iconTransform = newButtonObj.transform.Find("Icon") as RectTransform;
+        if (iconTransform)
+        {
+            iconTransform.anchoredPosition = new Vector2(-60f, 0f);
+            var scale = iconTransform.localScale;
+            iconTransform.localScale = new Vector3(-Mathf.Abs(scale.x), scale.y, scale.z);
+        }
+
+        var hover = newButtonObj.GetComponent<HoverEffect>();
+        if (hover)
+        {
+            hover._hoverPosition = new Vector2(-80f, 0f);
+            hover._hoverScale = new Vector3(-1.1f, 1.1f, 1f);
+        }
+
+        var hint = newButtonObj.GetComponent<SoftKitty.HintText>();
+        if (hint)
+            hint.HintString = "Class Select";
+    }
+
+    private Button FindClassSelectButton()
+    {
+        if (classSelectButton)
+            return classSelectButton;
+        if (!customizationRoot)
+            return null;
+
+        var existing = customizationRoot.transform.Find("Btn_ClassSelect");
+        if (existing)
+            return existing.GetComponent<Button>();
+
+        var buttons = customizationRoot.GetComponentsInChildren<Button>(true);
+        for (var i = 0; i < buttons.Length; i++)
+        {
+            if (buttons[i] && buttons[i].name == "Btn_ClassSelect")
+                return buttons[i];
+        }
+
+        return null;
     }
 
     private void Start()
@@ -264,7 +423,9 @@ public class CharacterCreationFlow : MonoBehaviour
             elfRendererStates = CacheRendererStates(elfPreviewRenderers);
             elfObjectLayers = CacheObjectLayers(elfPreview);
             elfPreviewEntity = elfPreview.GetComponent<CharacterEntity>();
-            elfPreviewEntityMcc = elfPreview.GetComponent<SoftKittyMcc.CharacterEntity>();
+            elfPreviewEntityMcc = elfPreviewEntity == null
+                ? elfPreview.GetComponent<SoftKittyMcc.CharacterEntity>()
+                : null;
             elfSelectedPosition = elfPreview.transform.localPosition;
         }
     }
@@ -494,16 +655,6 @@ public class CharacterCreationFlow : MonoBehaviour
         return result.ToArray();
     }
 
-    private void OnValidate()
-    {
-        if (!isActiveAndEnabled)
-            return;
-
-        ApplyPreviewLightLayers();
-        ApplyUnselectedLayerToSceneLights();
-        ApplyPreviewDirectionalLight();
-    }
-
     private void EnsurePreviewLight(GameObject preview, ref Light previewLight, string fallbackName)
     {
         if (!preview)
@@ -542,7 +693,8 @@ public class CharacterCreationFlow : MonoBehaviour
         EnsurePreviewSex(knightPreviewEntity, Sex.Male);
         EnsurePreviewSex(magePreviewEntity, Sex.Male);
         EnsurePreviewSex(elfPreviewEntity, Sex.Female);
-        EnsurePreviewSex(elfPreviewEntityMcc, SoftKittyMcc.Sex.Female);
+        if (elfPreviewEntity == null)
+            EnsurePreviewSex(elfPreviewEntityMcc, SoftKittyMcc.Sex.Female);
     }
 
     private static void EnsurePreviewSex(CharacterEntity entity, Sex targetSex)
@@ -565,10 +717,10 @@ public class CharacterCreationFlow : MonoBehaviour
     {
         ApplyPreviewPreset(knightPreviewEntity, knightPresetPath, "Knight");
         ApplyPreviewPreset(magePreviewEntity, magePresetPath, "Mage");
-        if (elfPreviewEntityMcc != null)
-            ApplyPreviewPreset(elfPreviewEntityMcc, elfPresetPath, "Elf");
-        else
+        if (elfPreviewEntity != null)
             ApplyPreviewPreset(elfPreviewEntity, elfPresetPath, "Elf");
+        else
+            ApplyPreviewPreset(elfPreviewEntityMcc, elfPresetPath, "Elf");
     }
 
     private static void ApplyPreviewPreset(CharacterEntity entity, string presetPath, string label)
@@ -785,6 +937,13 @@ public class CharacterCreationFlow : MonoBehaviour
         if (frontPanelRoot) frontPanelRoot.SetActive(false);
         if (customizationRoot) customizationRoot.SetActive(true);
         Debug.Log($"CharacterCreationFlow: frontPanelRoot active={frontPanelRoot.activeSelf}, customizationRoot active={customizationRoot.activeSelf}");
+
+        EnsureClassSelectButton();
+        classSelectButton = FindClassSelectButton();
+        if (classSelectButton)
+            SetupClassSelectButton(classSelectButton.gameObject);
+        else
+            Debug.LogWarning("CharacterCreationFlow: Btn_ClassSelect not found; back button will not work.");
 
         RestoreSceneLightingForCustomizer();
 
@@ -1003,6 +1162,47 @@ public class CharacterCreationFlow : MonoBehaviour
         ApplyPreviewLightLayers();
         ApplyUnselectedLayerToSceneLights();
         ApplyPreviewDirectionalLight();
+    }
+
+    public void BackToClassSelect()
+    {
+        if (!frontPanelRoot || !customizationRoot)
+        {
+            Debug.LogError("CharacterCreationFlow: UI roots not assigned; cannot return to class select.");
+            return;
+        }
+
+        var customizer = customizationRoot.GetComponentInChildren<CharacterCusUI>(true);
+        if (customizer)
+        {
+            customizer.StopAllCoroutines();
+            customizer.Initialized = false;
+            var canvasGroup = customizer.GetComponent<CanvasGroup>();
+            if (canvasGroup)
+            {
+                canvasGroup.alpha = 0f;
+                canvasGroup.interactable = false;
+                canvasGroup.blocksRaycasts = false;
+            }
+        }
+
+        if (CharacterManager.instance != null)
+        {
+            CharacterManager.instance.RemovePreviewCharacter("cc_Male");
+            CharacterManager.instance.RemovePreviewCharacter("cc_Female");
+        }
+
+        customizationRoot.SetActive(false);
+        frontPanelRoot.SetActive(true);
+        SetPreviewVisible(true);
+        RestoreSunDefaults();
+        ApplyPreviewLightLayers();
+        ApplyUnselectedLayerToSceneLights();
+        ApplyPreviewDirectionalLight();
+        ApplyPreviewPresets();
+        RefreshPreviewCaches();
+        ApplyClassHighlight();
+        RefreshClassDescription();
     }
 
     private void RestoreSunDefaults()
