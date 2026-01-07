@@ -19,7 +19,7 @@ public class LoadingUI : MonoBehaviour
     [SerializeField] private float pulseScale = 1.08f;
     [SerializeField] private Color pulseColor = Color.white;
     [SerializeField] private float markerInset = 10f;
-    [SerializeField] private Vector2 statusTextSize = new Vector2(200f, 50f);
+    [SerializeField] private Vector2 statusTextSize = new Vector2(220f, 50f);
 
     [Header("Target Scene")]
     [SerializeField] private string targetSceneName = "World";

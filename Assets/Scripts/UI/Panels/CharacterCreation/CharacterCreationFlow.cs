@@ -1343,7 +1343,16 @@ public class CharacterCreationFlow : MonoBehaviour
             return;
         }
 
-        var bytes = characterEntity.GetSaveBytes(BlurPrintType.Character);
+        byte[] bytes = null;
+        if (customizationRoot)
+        {
+            var customizer = customizationRoot.GetComponentInChildren<CharacterCusUI>(true);
+            if (customizer != null && customizer.MyCharacter != null && customizer.MyCharacter.MyData != null)
+                bytes = customizer.MyCharacter.MyData.ToBytes(BlurPrintType.AllAppearance);
+        }
+
+        if (bytes == null || bytes.Length == 0)
+            bytes = characterEntity.GetSaveBytes(BlurPrintType.AllAppearance);
         if (bytes == null || bytes.Length == 0)
         {
             Debug.LogError("CharacterCreationFlow: Failed to read customization bytes.");
