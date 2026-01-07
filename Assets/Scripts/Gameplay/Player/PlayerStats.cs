@@ -389,4 +389,33 @@ public class PlayerStats : MonoBehaviour
     private void RaiseVitals() => OnVitalsChanged?.Invoke();
     private void RaiseXP() => OnXpChanged?.Invoke();
     private void RaiseDerived() => OnDerivedChanged?.Invoke();
+
+    public void ApplyProgression(PlayerProgressionData data, bool fillVitals)
+    {
+        level = Mathf.Max(1, data.level);
+        strength = Mathf.Max(0, data.strength);
+        dexterity = Mathf.Max(0, data.dexterity);
+        vitality = Mathf.Max(0, data.vitality);
+        energy = Mathf.Max(0, data.energy);
+        availableStatPoints = Mathf.Max(0, data.availableStatPoints);
+
+        currentXp = Mathf.Max(0, data.currentXp);
+        xpToNext = ExpToNextFor(level);
+
+        if (fillVitals)
+        {
+            currentHp = MaxHp;
+            currentMp = MaxMp;
+            currentStamina = maxStamina;
+        }
+        else
+        {
+            RecalculateCapsAndClamp();
+        }
+
+        RaiseVitals();
+        RaiseXP();
+        RaiseDerived();
+        OnLevelChanged?.Invoke();
+    }
 }

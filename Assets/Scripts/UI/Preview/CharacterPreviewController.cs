@@ -5,6 +5,7 @@ using UnityEngine.UI;
 using Game.Items;
 using Game.Items.Definitions;
 using Game.Equipment;
+using Game.CharacterCreator;
 
 /// <summary>
 /// Displays a static live preview of the player model (no interaction).
@@ -19,6 +20,7 @@ public class CharacterPreviewController : MonoBehaviour
     [Header("Wiring")]
     [SerializeField] private Camera previewCameraPrefab;   // Solid Color; culling mask set here
     [SerializeField] private GameObject playerPrefab;      // visual-only prefab (no input/AI)
+    [SerializeField] private GameObject customPlayerPrefab; // MCC prefab (CharacterCreator/Core/Player)
     [SerializeField] private Light previewLightPrefab;     // optional
 
     [Header("Render Texture")]
@@ -59,6 +61,7 @@ public class CharacterPreviewController : MonoBehaviour
     public enum AutoFrameMode { Off, ExpandOnly, AlwaysFit }
 
     private static readonly EquipmentSlot[] ALL_SLOTS = (EquipmentSlot[])Enum.GetValues(typeof(EquipmentSlot));
+    private bool _usingCustomProfile;
 
     // ---------------------------------------------------------------------
     // Public API
@@ -142,9 +145,43 @@ public class CharacterPreviewController : MonoBehaviour
         _cam.targetTexture = _rt;
 
         // Visual-only clone
-        _clone = Instantiate(playerPrefab, _pivot);
+        var prefabToUse = playerPrefab;
+        PlayerCharacterProfile profile = null;
+        if (customPlayerPrefab && PlayerProfileStore.TryGetActive(out profile))
+        {
+            if (profile != null && profile.customizationBytes != null && profile.customizationBytes.Length > 0)
+            {
+                prefabToUse = customPlayerPrefab;
+                _usingCustomProfile = true;
+            }
+        }
+
+        _clone = Instantiate(prefabToUse, _pivot);
         SetLayerRecursively(_clone, _previewLayer);
-        StripRuntimeScripts(_clone); // keep renderers/animators
+
+        if (!_usingCustomProfile)
+            StripRuntimeScripts(_clone); // keep renderers/animators
+
+        if (_usingCustomProfile && profile != null)
+        {
+            if (CharacterManager.instance == null)
+            {
+                var managerGo = new GameObject("CharacterManager_Runtime");
+                managerGo.AddComponent<CharacterManager>();
+            }
+
+            var entity = _clone.GetComponentInChildren<CharacterEntity>(true);
+            if (entity && profile.customizationBytes != null && profile.customizationBytes.Length > 0)
+            {
+                var anim = _clone.GetComponentInChildren<Animator>(true);
+                if (anim)
+                {
+                    entity.MaleController = anim.runtimeAnimatorController;
+                    entity.FemaleController = anim.runtimeAnimatorController;
+                }
+                entity.LoadFromBytes(profile.customizationBytes);
+            }
+        }
         CenterCloneOnBounds(_clone.transform, out _modelBoundsLocal);
 
         // Face the camera
@@ -158,6 +195,17 @@ public class CharacterPreviewController : MonoBehaviour
         // --- NEW: add a visuals controller to the clone and auto-wire sockets/avatar roots ---
         _previewVis = _clone.AddComponent<EquipmentVisualsController>();
         AutoWirePreviewVisuals(_clone.transform, out _cloneSocketsRoot, out _cloneAvatarRoot);
+
+        if (_usingCustomProfile)
+        {
+            var entity = _clone.GetComponentInChildren<CharacterEntity>(true);
+            if (entity && entity.mCharacterBoneControl)
+            {
+                var rig = CharacterSocketUtility.EnsureSockets(entity.mCharacterBoneControl.transform);
+                if (rig.socketsRoot) _cloneSocketsRoot = rig.socketsRoot;
+                if (rig.avatarRoot) _cloneAvatarRoot = rig.avatarRoot;
+            }
+        }
 
         // Initialize the preview visuals controller
         var cloneAnimator = _clone.GetComponentInChildren<Animator>(true);

@@ -108,14 +108,23 @@ namespace Game.Equipment
 
         public void OnUnequipped(EquipmentSlot slot) => Unequip(slot);
 
-        public void InitForPreview(Transform sockets, Transform avatar, Animator anim = null)
-        {
-            socketsRoot = sockets ? sockets : transform;
-            avatarRoot = avatar;
-            animator = anim ? anim : animator;
-            _isPreviewContext = true;
-            CacheSockets();
-        }
+    public void InitForPreview(Transform sockets, Transform avatar, Animator anim = null)
+    {
+        socketsRoot = sockets ? sockets : transform;
+        avatarRoot = avatar;
+        animator = anim ? anim : animator;
+        _isPreviewContext = true;
+        CacheSockets();
+    }
+
+    public void RebindSockets(Transform sockets, Transform avatar, Animator anim = null)
+    {
+        socketsRoot = sockets ? sockets : transform;
+        avatarRoot = avatar;
+        animator = anim ? anim : animator;
+        _isPreviewContext = false;
+        CacheSockets();
+    }
 
         private void Unequip(EquipmentSlot slot)
         {

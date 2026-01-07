@@ -26,8 +26,6 @@ using UnityEditor.SceneManagement;
 
 public class CharacterCreationFlow : MonoBehaviour
 {
-    public enum PlayerClass { Knight, Mage, Elf }
-
     [Header("MCC References")]
     [SerializeField] private CharacterEntity characterEntity;
     [SerializeField] private GameObject customizationRoot; // CanvasRoot/CharacterCustomization
@@ -37,6 +35,7 @@ public class CharacterCreationFlow : MonoBehaviour
     [SerializeField] private UnityEngine.UI.InputField nameInput;
     [SerializeField] private Button customizeButton;
     [SerializeField] private Button classSelectButton;
+    [SerializeField] private Button resetProfileButton;
     [SerializeField] private GameObject previewRoot;             // Optional root for preview characters
     [SerializeField] private CharacterNameInputValidator nameInputValidator;
 
@@ -94,15 +93,12 @@ public class CharacterCreationFlow : MonoBehaviour
 
     [Header("Settings")]
     [SerializeField] private string worldSceneName = "World";
+    [SerializeField] private string loadingSceneName = "Loading";
+    [SerializeField] private string loadingScenePath = "Assets/Scenes/Loading.unity";
+    [SerializeField] private string transitionScenePath = "Assets/Scenes/Transition.unity";
     [SerializeField] private PlayerClass selectedClass = PlayerClass.Knight;
     [SerializeField] private ClassDescriptionPanel classDescriptionPanel;
 
-    private const string PlayerNameKey = "PlayerName";
-    private const string PlayerClassKey = "PlayerClass";
-    private const string PlayerPresetPathKey = "PlayerPresetPath";
-    private const string SaveFolderRoot = "MccBlueprints";
-    private const string SaveFolderCharacters = "Characters";
-    private const string SaveFileExtension = ".bytes";
     private const string KnightPreviewName = "CC_PreviewCharacter_Knight";
     private const string MagePreviewName = "CC_PreviewCharacter_Mage";
     private const string ElfPreviewName = "CC_PreviewCharacter_Elf";
@@ -124,8 +120,6 @@ public class CharacterCreationFlow : MonoBehaviour
     private Vector3 mageSelectedPosition;
     private Vector3 elfSelectedPosition;
 
-    private string SaveDir => Path.Combine(Application.persistentDataPath, SaveFolderRoot, SaveFolderCharacters);
-
     private void Awake()
     {
         Debug.Log("CharacterCreationFlow: Awake");
@@ -138,8 +132,6 @@ public class CharacterCreationFlow : MonoBehaviour
         // Front panel NameInput is not used in this flow.
         if (!classDescriptionPanel && frontPanelRoot)
             classDescriptionPanel = frontPanelRoot.GetComponentInChildren<ClassDescriptionPanel>(true);
-
-        TryEnsureSaveDir();
 
         // Start state
         if (frontPanelRoot) frontPanelRoot.SetActive(true);
@@ -175,6 +167,7 @@ public class CharacterCreationFlow : MonoBehaviour
             customizeButton.onClick.AddListener(OpenCustomizer);
         }
 
+        TryWireResetProfileButton();
         EnsureClassSelectButton();
 
         var frontName = frontPanelRoot ? frontPanelRoot.transform.Find("NameInput") : null;
@@ -194,6 +187,8 @@ public class CharacterCreationFlow : MonoBehaviour
             if (!nameInputValidator)
                 nameInputValidator = nameInput.gameObject.AddComponent<CharacterNameInputValidator>();
             nameInputValidator.BindInputField(nameInput);
+            if (!string.IsNullOrEmpty(nameInput.text))
+                nameInput.text = string.Empty;
         }
 
         selectedClass = PlayerClass.Knight;
@@ -1347,76 +1342,68 @@ public class CharacterCreationFlow : MonoBehaviour
             Debug.LogError("CharacterCreationFlow: Player name contains invalid file name characters.");
             return;
         }
-        if (!TryEnsureSaveDir(out var saveDir))
-            return;
 
-        var safeFileName = GetUniqueFileName(saveDir, playerName, SaveFileExtension);
-        var presetPath = Path.Combine(saveDir, safeFileName + SaveFileExtension);
-
-        try
+        var bytes = characterEntity.GetSaveBytes(BlurPrintType.Character);
+        if (bytes == null || bytes.Length == 0)
         {
-            // Save CHARACTER ONLY (no outfits)
-            characterEntity.SaveByteFileToDisk(presetPath, BlurPrintType.Character);
-        }
-        catch (System.Exception ex)
-        {
-            Debug.LogError($"CharacterCreationFlow: Failed to save preset file. {ex.Message}");
+            Debug.LogError("CharacterCreationFlow: Failed to read customization bytes.");
             return;
         }
 
-        if (!File.Exists(presetPath))
-        {
-            Debug.LogError($"CharacterCreationFlow: Preset file was not created at '{presetPath}'.");
-            return;
-        }
-
-        // Minimal v1 profile storage
-        PlayerPrefs.SetString(PlayerNameKey, playerName);
-        PlayerPrefs.SetInt(PlayerClassKey, (int)selectedClass);
-        PlayerPrefs.SetString(PlayerPresetPathKey, presetPath);
-        PlayerPrefs.Save();
+        var profile = PlayerCharacterProfile.CreateNew(playerName, selectedClass, bytes);
+        PlayerProfileStore.SetActive(profile);
 
         if (nameInputValidator != null)
             nameInputValidator.RegisterCreatedName(playerName);
 
-        SceneManager.LoadScene(worldSceneName);
+        StartTransitionToLoading();
     }
 
-    private bool TryEnsureSaveDir()
+    public void ResetProfile()
     {
-        return TryEnsureSaveDir(out _);
+        PlayerProfileStore.Clear();
+        if (nameInput)
+            nameInput.text = string.Empty;
+        Debug.Log("CharacterCreationFlow: Profile reset (runtime only).");
     }
 
-    private bool TryEnsureSaveDir(out string saveDir)
+    private void TryWireResetProfileButton()
     {
-        saveDir = SaveDir;
-        if (string.IsNullOrWhiteSpace(saveDir))
+        if (!resetProfileButton)
         {
-            Debug.LogError("CharacterCreationFlow: Invalid save directory path.");
-            return false;
+            var resetTransform = frontPanelRoot ? frontPanelRoot.transform.Find("Btn_ResetProfile") : null;
+            if (resetTransform)
+                resetProfileButton = resetTransform.GetComponent<Button>();
         }
 
-        try
+        if (!resetProfileButton && customizationRoot)
         {
-            Directory.CreateDirectory(saveDir);
-            return true;
+            var resetTransform = customizationRoot.transform.Find("Btn_ResetProfile");
+            if (resetTransform)
+                resetProfileButton = resetTransform.GetComponent<Button>();
         }
-        catch (System.Exception ex)
+
+        if (resetProfileButton)
         {
-            Debug.LogError($"CharacterCreationFlow: Failed to create save directory. {ex.Message}");
-            return false;
+            resetProfileButton.onClick.RemoveListener(ResetProfile);
+            resetProfileButton.onClick.AddListener(ResetProfile);
         }
     }
 
-    private static string GetUniqueFileName(string folderPath, string baseName, string extension)
+    private void StartTransitionToLoading()
     {
-        var candidate = baseName;
-        var index = 2;
-        while (File.Exists(Path.Combine(folderPath, candidate + extension)))
+        TransitionUI.LastScene = SceneManager.GetActiveScene();
+        TransitionUI.NextScene = loadingSceneName;
+        TransitionUI.NextScenePath = loadingScenePath;
+#if UNITY_EDITOR
+        if (Application.isEditor && !string.IsNullOrWhiteSpace(transitionScenePath))
         {
-            candidate = $"{baseName}_{index}";
-            index++;
+            UnityEditor.SceneManagement.EditorSceneManager.LoadSceneAsyncInPlayMode(
+                transitionScenePath,
+                new LoadSceneParameters(LoadSceneMode.Additive));
+            return;
         }
-        return candidate;
+#endif
+        SceneManager.LoadScene("Transition", LoadSceneMode.Additive);
     }
 }

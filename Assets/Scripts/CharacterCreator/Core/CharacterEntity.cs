@@ -322,6 +322,8 @@ namespace Game.CharacterCreator
         public void LoadDefaultWeapon()
         {
             UnequipAllWeapons();
+            if (Weapons == null || Weapons.Length == 0)
+                return;
             for (int i = 0; i < Weapons.Length; i++)
             {
                 if (Weapons[i] != null) EquipWeapon(Weapons[i], DefaultWeaponState);

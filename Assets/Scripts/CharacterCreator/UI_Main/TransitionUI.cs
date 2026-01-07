@@ -12,6 +12,7 @@ namespace Game.CharacterCreator
         public static Scene LastScene;
         public static TransitionUI instance;
         public static string NextScene;
+        public static string NextScenePath;
         public CanvasGroup LoadingCanvas;
         public AudioListener Listener;
         public Image ProgressMask;
@@ -28,9 +29,26 @@ namespace Game.CharacterCreator
             }
             LoadingCanvas.alpha = 1F;
             SceneManager.SetActiveScene(SceneManager.GetSceneByName("Transition"));
-            yield return SceneManager.UnloadSceneAsync(LastScene);
+            if (LastScene.IsValid() && LastScene.isLoaded)
+                yield return SceneManager.UnloadSceneAsync(LastScene);
             Listener.enabled = true;
+#if UNITY_EDITOR
+            AsyncOperation operation;
+            if (Application.isEditor && !string.IsNullOrWhiteSpace(NextScenePath))
+            {
+                operation = UnityEditor.SceneManagement.EditorSceneManager.LoadSceneAsyncInPlayMode(
+                    NextScenePath,
+                    new LoadSceneParameters(LoadSceneMode.Additive));
+            }
+            else
+            {
+                operation = SceneManager.LoadSceneAsync(NextScene, LoadSceneMode.Additive);
+            }
+#else
             AsyncOperation operation = SceneManager.LoadSceneAsync(NextScene, LoadSceneMode.Additive);
+#endif
+            if (operation == null)
+                yield break;
             while (!operation.isDone)
             {
                 yield return 1;
@@ -38,6 +56,7 @@ namespace Game.CharacterCreator
             }
             Listener.enabled = false;
             ProgressMask.fillAmount = 1F;
+            NextScenePath = string.Empty;
            
             while (LoadingCanvas.alpha > 0F)
             {
