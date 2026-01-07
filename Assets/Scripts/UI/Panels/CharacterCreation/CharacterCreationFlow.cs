@@ -38,6 +38,7 @@ public class CharacterCreationFlow : MonoBehaviour
     [SerializeField] private Button customizeButton;
     [SerializeField] private Button classSelectButton;
     [SerializeField] private GameObject previewRoot;             // Optional root for preview characters
+    [SerializeField] private CharacterNameInputValidator nameInputValidator;
 
     [Header("Class Buttons")]
     [SerializeField] private Button knightButton;
@@ -185,6 +186,14 @@ public class CharacterCreationFlow : MonoBehaviour
             var customizer = customizationRoot ? customizationRoot.GetComponentInChildren<CharacterCusUI>(true) : null;
             if (customizer && customizer.NameInput)
                 nameInput = customizer.NameInput;
+        }
+        if (nameInput)
+        {
+            if (!nameInputValidator)
+                nameInputValidator = nameInput.GetComponent<CharacterNameInputValidator>();
+            if (!nameInputValidator)
+                nameInputValidator = nameInput.gameObject.AddComponent<CharacterNameInputValidator>();
+            nameInputValidator.BindInputField(nameInput);
         }
 
         selectedClass = PlayerClass.Knight;
@@ -1320,6 +1329,14 @@ public class CharacterCreationFlow : MonoBehaviour
         }
 
         var playerName = (nameInput.text ?? "").Trim();
+        if (nameInputValidator != null)
+        {
+            if (!nameInputValidator.TryGetValidatedName(out playerName, out var reason))
+            {
+                Debug.LogError($"CharacterCreationFlow: {reason}");
+                return;
+            }
+        }
         if (string.IsNullOrEmpty(playerName))
         {
             Debug.LogError("CharacterCreationFlow: Player name is empty.");
@@ -1358,6 +1375,9 @@ public class CharacterCreationFlow : MonoBehaviour
         PlayerPrefs.SetInt(PlayerClassKey, (int)selectedClass);
         PlayerPrefs.SetString(PlayerPresetPathKey, presetPath);
         PlayerPrefs.Save();
+
+        if (nameInputValidator != null)
+            nameInputValidator.RegisterCreatedName(playerName);
 
         SceneManager.LoadScene(worldSceneName);
     }
