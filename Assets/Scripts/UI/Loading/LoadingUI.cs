@@ -21,6 +21,12 @@ public class LoadingUI : MonoBehaviour
     [SerializeField] private float markerInset = 10f;
     [SerializeField] private Vector2 statusTextSize = new Vector2(220f, 50f);
 
+    [Header("Transition")]
+    [SerializeField] private CanvasGroup fadeGroup;
+    [SerializeField] private float fadeInDuration = 0.35f;
+    [SerializeField] private float fadeOutDuration = 0.25f;
+    [SerializeField] private bool fadeOutOnActivate = true;
+
     [Header("Target Scene")]
     [SerializeField] private string targetSceneName = "World";
     [SerializeField] private string targetScenePath = "Assets/Scenes/World/Zone_01_StarterField.unity";
@@ -52,6 +58,15 @@ public class LoadingUI : MonoBehaviour
         ReparentPercentText();
         ReparentMarker();
         DisableOtherStatusText();
+        if (!fadeGroup)
+            fadeGroup = GetComponentInChildren<CanvasGroup>(true);
+
+        if (fadeGroup)
+        {
+            fadeGroup.alpha = fadeInDuration > 0f ? 0f : 1f;
+            if (fadeInDuration > 0f)
+                yield return FadeCanvasGroup(fadeGroup, 0f, 1f, fadeInDuration);
+        }
 
         if (statusText)
         {
@@ -94,6 +109,7 @@ public class LoadingUI : MonoBehaviour
         loadOp.allowSceneActivation = false;
 
         bool ready = false;
+        bool activationQueued = false;
         while (!loadOp.isDone)
         {
             float targetProgress = Mathf.Clamp01(loadOp.progress / 0.9f);
@@ -109,8 +125,13 @@ public class LoadingUI : MonoBehaviour
             UpdateProgressUI(displayProgress);
             UpdateReadyPulse(ready);
 
-            if (ready && Input.anyKeyDown)
+            if (ready && Input.anyKeyDown && !activationQueued)
+            {
+                activationQueued = true;
+                if (fadeOutOnActivate && fadeGroup && fadeOutDuration > 0f)
+                    yield return FadeCanvasGroup(fadeGroup, fadeGroup.alpha, 0f, fadeOutDuration);
                 loadOp.allowSceneActivation = true;
+            }
 
             yield return null;
         }
@@ -294,5 +315,27 @@ public class LoadingUI : MonoBehaviour
         statusText.color = Color.Lerp(statusBaseColor, pulseColor, t);
         float scale = Mathf.Lerp(1f, pulseScale, t);
         statusText.rectTransform.localScale = statusBaseScale * scale;
+    }
+
+    private IEnumerator FadeCanvasGroup(CanvasGroup group, float from, float to, float duration)
+    {
+        if (!group)
+            yield break;
+
+        if (duration <= 0f)
+        {
+            group.alpha = to;
+            yield break;
+        }
+
+        float elapsed = 0f;
+        group.alpha = from;
+        while (elapsed < duration)
+        {
+            elapsed += Time.unscaledDeltaTime;
+            group.alpha = Mathf.Lerp(from, to, Mathf.Clamp01(elapsed / duration));
+            yield return null;
+        }
+        group.alpha = to;
     }
 }

@@ -1401,18 +1401,15 @@ public class CharacterCreationFlow : MonoBehaviour
 
     private void StartTransitionToLoading()
     {
-        TransitionUI.LastScene = SceneManager.GetActiveScene();
-        TransitionUI.NextScene = loadingSceneName;
-        TransitionUI.NextScenePath = loadingScenePath;
 #if UNITY_EDITOR
-        if (Application.isEditor && !string.IsNullOrWhiteSpace(transitionScenePath))
+        if (Application.isEditor && !string.IsNullOrWhiteSpace(loadingScenePath))
         {
             UnityEditor.SceneManagement.EditorSceneManager.LoadSceneAsyncInPlayMode(
-                transitionScenePath,
-                new LoadSceneParameters(LoadSceneMode.Additive));
+                loadingScenePath,
+                new LoadSceneParameters(LoadSceneMode.Single));
             return;
         }
 #endif
-        SceneManager.LoadScene("Transition", LoadSceneMode.Additive);
+        SceneManager.LoadScene(loadingSceneName, LoadSceneMode.Single);
     }
 }
